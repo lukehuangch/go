@@ -290,7 +290,6 @@ const (
 	APCDATA
 	ARET
 	ATEXT
-	ATYPE
 	AUNDEF
 	AUSEFIELD
 	AVARDEF
@@ -804,7 +803,6 @@ type LinkArch struct {
 	*sys.Arch
 	Preprocess func(*Link, *LSym)
 	Assemble   func(*Link, *LSym)
-	Follow     func(*Link, *LSym)
 	Progedit   func(*Link, *Prog)
 	UnaryDst   map[As]bool // Instruction takes one operand, a destination.
 }

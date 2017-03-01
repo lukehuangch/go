@@ -250,7 +250,7 @@ type state struct {
 }
 
 type funcLine struct {
-	f    *Node
+	f    *obj.LSym
 	line src.XPos
 }
 
@@ -794,7 +794,7 @@ func (s *state) stmt(n *Node) {
 		s.stmtList(n.List)
 		b := s.exit()
 		b.Kind = ssa.BlockRetJmp // override BlockRet
-		b.Aux = n.Left.Sym
+		b.Aux = Linksym(n.Left.Sym)
 
 	case OCONTINUE, OBREAK:
 		var op string
@@ -1411,15 +1411,6 @@ func (s *state) ssaShiftOp(op Op, t *Type, u *Type) ssa.Op {
 	return x
 }
 
-func (s *state) ssaRotateOp(op Op, t *Type) ssa.Op {
-	etype1 := s.concreteEtype(t)
-	x, ok := opToSSA[opAndType{op, etype1}]
-	if !ok {
-		s.Fatalf("unhandled rotate op %v etype=%s", op, etype1)
-	}
-	return x
-}
-
 // expr converts the expression n to ssa, adds it to s and returns the ssa result.
 func (s *state) expr(n *Node) *ssa.Value {
 	if !(n.Op == ONAME || n.Op == OLITERAL && n.Sym != nil) {
@@ -1442,12 +1433,12 @@ func (s *state) expr(n *Node) *ssa.Value {
 		len := s.newValue1(ssa.OpStringLen, Types[TINT], str)
 		return s.newValue3(ssa.OpSliceMake, n.Type, ptr, len, len)
 	case OCFUNC:
-		aux := s.lookupSymbol(n, &ssa.ExternSymbol{Typ: n.Type, Sym: n.Left.Sym})
+		aux := s.lookupSymbol(n, &ssa.ExternSymbol{Typ: n.Type, Sym: Linksym(n.Left.Sym)})
 		return s.entryNewValue1A(ssa.OpAddr, n.Type, aux, s.sb)
 	case ONAME:
 		if n.Class == PFUNC {
 			// "value" of a function is the address of the function's closure
-			sym := funcsym(n.Sym)
+			sym := Linksym(funcsym(n.Sym))
 			aux := &ssa.ExternSymbol{Typ: n.Type, Sym: sym}
 			return s.entryNewValue1A(ssa.OpAddr, ptrto(n.Type), aux, s.sb)
 		}
@@ -2106,6 +2097,15 @@ func (s *state) expr(n *Node) *ssa.Value {
 	case OAPPEND:
 		return s.append(n, false)
 
+	case OSTRUCTLIT, OARRAYLIT:
+		// All literals with nonzero fields have already been
+		// rewritten during walk. Any that remain are just T{}
+		// or equivalents. Use the zero value.
+		if !iszero(n) {
+			Fatalf("literal with nonzero value in SSA: %v", n)
+		}
+		return s.zeroVal(n.Type)
+
 	default:
 		s.Fatalf("unhandled expr %v", n.Op)
 		return nil
@@ -2196,7 +2196,7 @@ func (s *state) append(n *Node, inplace bool) *ssa.Value {
 
 	// Call growslice
 	s.startBlock(grow)
-	taddr := s.newValue1A(ssa.OpAddr, Types[TUINTPTR], &ssa.ExternSymbol{Typ: Types[TUINTPTR], Sym: typenamesym(n.Type.Elem())}, s.sb)
+	taddr := s.newValue1A(ssa.OpAddr, Types[TUINTPTR], &ssa.ExternSymbol{Typ: Types[TUINTPTR], Sym: Linksym(typenamesym(n.Type.Elem()))}, s.sb)
 
 	r := s.rtcall(growslice, true, []*Type{pt, Types[TINT], Types[TINT]}, taddr, p, l, c, nl)
 
@@ -3004,7 +3004,7 @@ func (s *state) call(n *Node, k callKind) *ssa.Value {
 	case codeptr != nil:
 		call = s.newValue2(ssa.OpInterCall, ssa.TypeMem, codeptr, s.mem())
 	case sym != nil:
-		call = s.newValue1A(ssa.OpStaticCall, ssa.TypeMem, sym, s.mem())
+		call = s.newValue1A(ssa.OpStaticCall, ssa.TypeMem, Linksym(sym), s.mem())
 	default:
 		Fatalf("bad call type %v %v", n.Op, n)
 	}
@@ -3080,7 +3080,7 @@ func (s *state) addr(n *Node, bounded bool) (*ssa.Value, bool) {
 		switch n.Class {
 		case PEXTERN:
 			// global variable
-			aux := s.lookupSymbol(n, &ssa.ExternSymbol{Typ: n.Type, Sym: n.Sym})
+			aux := s.lookupSymbol(n, &ssa.ExternSymbol{Typ: n.Type, Sym: Linksym(n.Sym)})
 			v := s.entryNewValue1A(ssa.OpAddr, t, aux, s.sb)
 			// TODO: Make OpAddr use AuxInt as well as Aux.
 			if n.Xoffset != 0 {
@@ -3303,7 +3303,7 @@ func (s *state) sliceBoundsCheck(idx, len *ssa.Value) {
 }
 
 // If cmp (a bool) is false, panic using the given function.
-func (s *state) check(cmp *ssa.Value, fn *Node) {
+func (s *state) check(cmp *ssa.Value, fn *obj.LSym) {
 	b := s.endBlock()
 	b.Kind = ssa.BlockIf
 	b.SetControl(cmp)
@@ -3344,7 +3344,7 @@ func (s *state) intDivide(n *Node, a, b *ssa.Value) *ssa.Value {
 // Returns a slice of results of the given result types.
 // The call is added to the end of the current block.
 // If returns is false, the block is marked as an exit block.
-func (s *state) rtcall(fn *Node, returns bool, results []*Type, args ...*ssa.Value) []*ssa.Value {
+func (s *state) rtcall(fn *obj.LSym, returns bool, results []*Type, args ...*ssa.Value) []*ssa.Value {
 	// Write args to the stack
 	off := Ctxt.FixedFrameSize()
 	for _, arg := range args {
@@ -3365,7 +3365,7 @@ func (s *state) rtcall(fn *Node, returns bool, results []*Type, args ...*ssa.Val
 	}
 
 	// Issue call
-	call := s.newValue1A(ssa.OpStaticCall, ssa.TypeMem, fn.Sym, s.mem())
+	call := s.newValue1A(ssa.OpStaticCall, ssa.TypeMem, fn, s.mem())
 	s.vars[&memVar] = call
 
 	if !returns {
@@ -3436,7 +3436,7 @@ func (s *state) insertWBmove(t *Type, left, right *ssa.Value, line src.XPos, rig
 		}
 		val = s.newValue3I(op, ssa.TypeMem, sizeAlignAuxInt(t), left, right, s.mem())
 	}
-	val.Aux = &ssa.ExternSymbol{Typ: Types[TUINTPTR], Sym: typenamesym(t)}
+	val.Aux = &ssa.ExternSymbol{Typ: Types[TUINTPTR], Sym: Linksym(typenamesym(t))}
 	s.vars[&memVar] = val
 
 	// WB ops will be expanded to branches at writebarrier phase.
@@ -4177,7 +4177,7 @@ func (s *state) dottype(n *Node, commaok bool) (res, resok *ssa.Value) {
 	if !commaok {
 		// on failure, panic by calling panicdottype
 		s.startBlock(bFail)
-		taddr := s.newValue1A(ssa.OpAddr, byteptr, &ssa.ExternSymbol{Typ: byteptr, Sym: typenamesym(n.Left.Type)}, s.sb)
+		taddr := s.newValue1A(ssa.OpAddr, byteptr, &ssa.ExternSymbol{Typ: byteptr, Sym: Linksym(typenamesym(n.Left.Type))}, s.sb)
 		s.rtcall(panicdottype, false, nil, typ, target, taddr)
 
 		// on success, return data from interface
@@ -4578,14 +4578,7 @@ func AddAux2(a *obj.Addr, v *ssa.Value, offset int64) {
 	switch sym := v.Aux.(type) {
 	case *ssa.ExternSymbol:
 		a.Name = obj.NAME_EXTERN
-		switch s := sym.Sym.(type) {
-		case *Sym:
-			a.Sym = Linksym(s)
-		case *obj.LSym:
-			a.Sym = s
-		default:
-			v.Fatalf("ExternSymbol.Sym is %T", s)
-		}
+		a.Sym = sym.Sym
 	case *ssa.ArgSymbol:
 		n := sym.Node.(*Node)
 		a.Name = obj.NAME_PARAM
@@ -4610,7 +4603,7 @@ func sizeAlignAuxInt(t *Type) int64 {
 
 // extendIndex extends v to a full int width.
 // panic using the given function if v does not fit in an int (only on 32-bit archs).
-func (s *state) extendIndex(v *ssa.Value, panicfn *Node) *ssa.Value {
+func (s *state) extendIndex(v *ssa.Value, panicfn *obj.LSym) *ssa.Value {
 	size := v.Type.Size()
 	if size == s.config.IntSize {
 		return v
@@ -4981,8 +4974,8 @@ func (e *ssaExport) Debug_wb() bool {
 	return Debug_wb != 0
 }
 
-func (e *ssaExport) Syslook(name string) interface{} {
-	return syslook(name).Sym
+func (e *ssaExport) Syslook(name string) *obj.LSym {
+	return Linksym(syslook(name).Sym)
 }
 
 func (n *Node) Typ() ssa.Type {
