@@ -188,7 +188,7 @@ func typecheckswitch(n *Node) {
 				}
 
 				nvar = typecheck(nvar, Erv|Easgn)
-				ncase.Rlist.SetIndex(0, nvar)
+				ncase.Rlist.SetFirst(nvar)
 			}
 		}
 
@@ -628,8 +628,8 @@ func (s *exprSwitch) checkDupCases(cc []caseClause) {
 
 			case c.node.List.Len() == 2:
 				// Range of integers.
-				low := c.node.List.Index(0).Int64()
-				high := c.node.List.Index(1).Int64()
+				low := c.node.List.First().Int64()
+				high := c.node.List.Second().Int64()
 				for i := low; i <= high; i++ {
 					prev, dup := seen[i]
 					if !dup {
@@ -729,11 +729,13 @@ func (s *typeSwitch) walk(sw *Node) {
 	// Use a similar strategy for non-empty interfaces.
 
 	// Get interface descriptor word.
-	typ := nod(OITAB, s.facename, nil)
+	// For empty interfaces this will be the type.
+	// For non-empty interfaces this will be the itab.
+	itab := nod(OITAB, s.facename, nil)
 
 	// Check for nil first.
 	i := nod(OIF, nil, nil)
-	i.Left = nod(OEQ, typ, nodnil())
+	i.Left = nod(OEQ, itab, nodnil())
 	if clauses.niljmp != nil {
 		// Do explicit nil case right here.
 		i.Nbody.Set1(clauses.niljmp)
@@ -743,22 +745,22 @@ func (s *typeSwitch) walk(sw *Node) {
 		i.Nbody.Set1(nod(OGOTO, lbl, nil))
 		// Wrap default case with label.
 		blk := nod(OBLOCK, nil, nil)
-		blk.List.Set([]*Node{nod(OLABEL, lbl, nil), def})
+		blk.List.Set2(nod(OLABEL, lbl, nil), def)
 		def = blk
 	}
 	i.Left = typecheck(i.Left, Erv)
 	cas = append(cas, i)
 
-	if !cond.Right.Type.IsEmptyInterface() {
-		// Load type from itab.
-		typ = itabType(typ)
-	}
-	// Load hash from type.
-	h := nodSym(ODOTPTR, typ, nil)
+	// Load hash from type or itab.
+	h := nodSym(ODOTPTR, itab, nil)
 	h.Type = Types[TUINT32]
 	h.Typecheck = 1
-	h.Xoffset = int64(2 * Widthptr) // offset of hash in runtime._type
-	h.Bounded = true                // guaranteed not to fault
+	if cond.Right.Type.IsEmptyInterface() {
+		h.Xoffset = int64(2 * Widthptr) // offset of hash in runtime._type
+	} else {
+		h.Xoffset = int64(3 * Widthptr) // offset of hash in runtime.itab
+	}
+	h.Bounded = true // guaranteed not to fault
 	a = nod(OAS, s.hashname, h)
 	a = typecheck(a, Etop)
 	cas = append(cas, a)
@@ -838,7 +840,7 @@ func (s *typeSwitch) typeone(t *Node) *Node {
 	}
 
 	a := nod(OAS2, nil, nil)
-	a.List.Set([]*Node{name, s.okname}) // name, ok =
+	a.List.Set2(name, s.okname) // name, ok =
 	b := nod(ODOTTYPE, s.facename, nil)
 	b.Type = t.Left.Type // interface.(type)
 	a.Rlist.Set1(b)

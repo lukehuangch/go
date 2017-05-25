@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 var (
@@ -33,6 +34,7 @@ var (
 )
 
 var cmdGoPath string
+var failed uint32 // updated atomically
 
 func main() {
 	log.SetPrefix("vet/all: ")
@@ -59,10 +61,14 @@ func main() {
 	case *flagAll:
 		vetPlatforms(allPlatforms())
 	default:
-		host := platform{os: build.Default.GOOS, arch: build.Default.GOARCH}
-		host.vet(runtime.GOMAXPROCS(-1))
+		hostPlatform.vet(runtime.GOMAXPROCS(-1))
+	}
+	if atomic.LoadUint32(&failed) != 0 {
+		os.Exit(1)
 	}
 }
+
+var hostPlatform = platform{os: build.Default.GOOS, arch: build.Default.GOARCH}
 
 func allPlatforms() []platform {
 	var pp []platform
@@ -177,6 +183,14 @@ var ignorePathPrefixes = [...]string{
 	"cmd/go/testdata/",
 	"cmd/vet/testdata/",
 	"go/printer/testdata/",
+	// fmt_test contains a known bad format string.
+	// We cannot add it to any given whitelist,
+	// because it won't show up for any non-host platform,
+	// due to deficiencies in vet.
+	// Just whitelist the whole file.
+	// TODO: If vet ever uses go/loader and starts working off source,
+	// this problem will likely go away.
+	"fmt/fmt_test.go",
 }
 
 func vetPlatforms(pp []platform) {
@@ -204,14 +218,18 @@ func (p platform) vet(ncpus int) {
 	w := make(whitelist)
 	w.load(p.os, p.arch)
 
-	env := append(os.Environ(), "GOOS="+p.os, "GOARCH="+p.arch)
+	env := append(os.Environ(), "GOOS="+p.os, "GOARCH="+p.arch, "CGO_ENABLED=0")
 
 	// Do 'go install std' before running vet.
 	// It is cheap when already installed.
 	// Not installing leads to non-obvious failures due to inability to typecheck.
 	// TODO: If go/loader ever makes it to the standard library, have vet use it,
 	// at which point vet can work off source rather than compiled packages.
-	cmd := exec.Command(cmdGoPath, "install", "-p", strconv.Itoa(ncpus), "std")
+	gcflags := ""
+	if p != hostPlatform {
+		gcflags = "-dolinkobj=false"
+	}
+	cmd := exec.Command(cmdGoPath, "install", "-p", strconv.Itoa(ncpus), "-gcflags="+gcflags, "std")
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -224,7 +242,18 @@ func (p platform) vet(ncpus int) {
 	// and no clear way to improve vet to eliminate large chunks of them.
 	// And having them in the whitelists will just cause annoyance
 	// and churn when working on the runtime.
-	cmd = exec.Command(cmdGoPath, "tool", "vet", "-unsafeptr=false", ".")
+	args := []string{"tool", "vet", "-unsafeptr=false"}
+	if p != hostPlatform {
+		// When not checking the host platform, vet gets confused by
+		// the fmt.Formatters in cmd/compile,
+		// so just skip the printf checks on non-host platforms for now.
+		// There's not too much platform-specific code anyway.
+		// TODO: If vet ever uses go/loader and starts working off source,
+		// this problem will likely go away.
+		args = append(args, "-printf=false")
+	}
+	args = append(args, ".")
+	cmd = exec.Command(cmdGoPath, args...)
 	cmd.Dir = filepath.Join(runtime.GOROOT(), "src")
 	cmd.Env = env
 	stderr, err := cmd.StderrPipe()
@@ -273,6 +302,7 @@ NextLine:
 			} else {
 				fmt.Fprintf(&buf, "%s:%s: %s\n", file, lineno, msg)
 			}
+			atomic.StoreUint32(&failed, 1)
 			continue
 		}
 		w[key]--
@@ -297,6 +327,7 @@ NextLine:
 				for i := 0; i < v; i++ {
 					fmt.Fprintln(&buf, k)
 				}
+				atomic.StoreUint32(&failed, 1)
 			}
 		}
 	}
@@ -327,6 +358,8 @@ var archAsmX = map[string]string{
 	"android":  "linux",
 	"mips64":   "mips64x",
 	"mips64le": "mips64x",
+	"mips":     "mipsx",
+	"mipsle":   "mipsx",
 	"ppc64":    "ppc64x",
 	"ppc64le":  "ppc64x",
 }

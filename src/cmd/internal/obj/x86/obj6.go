@@ -742,27 +742,35 @@ func preprocess(ctxt *obj.Link, cursym *obj.LSym) {
 	}
 
 	if cursym.Text.From3Offset()&obj.WRAPPER != 0 {
-		// if(g->panic != nil && g->panic->argp == FP) g->panic->argp = bottom-of-frame
+		// if g._panic != nil && g._panic.argp == FP {
+		//   g._panic.argp = bottom-of-frame
+		// }
 		//
 		//	MOVQ g_panic(CX), BX
 		//	TESTQ BX, BX
-		//	JEQ end
+		//	JNE checkargp
+		// end:
+		//	NOP
+		//  ... rest of function ...
+		// checkargp:
 		//	LEAQ (autoffset+8)(SP), DI
 		//	CMPQ panic_argp(BX), DI
 		//	JNE end
-		//	MOVQ SP, panic_argp(BX)
-		// end:
-		//	NOP
+		//  MOVQ SP, panic_argp(BX)
+		//  JMP end
 		//
 		// The NOP is needed to give the jumps somewhere to land.
 		// It is a liblink NOP, not an x86 NOP: it encodes to 0 instruction bytes.
+		//
+		// The layout is chosen to help static branch prediction:
+		// Both conditional jumps are unlikely, so they are arranged to be forward jumps.
 
+		// MOVQ g_panic(CX), BX
 		p = obj.Appendp(ctxt, p)
-
 		p.As = AMOVQ
 		p.From.Type = obj.TYPE_MEM
 		p.From.Reg = REG_CX
-		p.From.Offset = 4 * int64(ctxt.Arch.PtrSize) // G.panic
+		p.From.Offset = 4 * int64(ctxt.Arch.PtrSize) // g_panic
 		p.To.Type = obj.TYPE_REG
 		p.To.Reg = REG_BX
 		if ctxt.Headtype == obj.Hnacl && p.Mode == 64 {
@@ -776,6 +784,7 @@ func preprocess(ctxt *obj.Link, cursym *obj.LSym) {
 			p.As = AMOVL
 		}
 
+		// TESTQ BX, BX
 		p = obj.Appendp(ctxt, p)
 		p.As = ATESTQ
 		p.From.Type = obj.TYPE_REG
@@ -786,12 +795,23 @@ func preprocess(ctxt *obj.Link, cursym *obj.LSym) {
 			p.As = ATESTL
 		}
 
-		p = obj.Appendp(ctxt, p)
-		p.As = AJEQ
-		p.To.Type = obj.TYPE_BRANCH
-		p1 := p
+		// JNE checkargp (checkargp to be resolved later)
+		jne := obj.Appendp(ctxt, p)
+		jne.As = AJNE
+		jne.To.Type = obj.TYPE_BRANCH
 
-		p = obj.Appendp(ctxt, p)
+		// end:
+		//  NOP
+		end := obj.Appendp(ctxt, jne)
+		end.As = obj.ANOP
+
+		// Fast forward to end of function.
+		var last *obj.Prog
+		for last = end; last.Link != nil; last = last.Link {
+		}
+
+		// LEAQ (autoffset+8)(SP), DI
+		p = obj.Appendp(ctxt, last)
 		p.As = ALEAQ
 		p.From.Type = obj.TYPE_MEM
 		p.From.Reg = REG_SP
@@ -802,6 +822,10 @@ func preprocess(ctxt *obj.Link, cursym *obj.LSym) {
 			p.As = ALEAL
 		}
 
+		// Set jne branch target.
+		jne.Pcond = p
+
+		// CMPQ panic_argp(BX), DI
 		p = obj.Appendp(ctxt, p)
 		p.As = ACMPQ
 		p.From.Type = obj.TYPE_MEM
@@ -820,11 +844,13 @@ func preprocess(ctxt *obj.Link, cursym *obj.LSym) {
 			p.As = ACMPL
 		}
 
+		// JNE end
 		p = obj.Appendp(ctxt, p)
 		p.As = AJNE
 		p.To.Type = obj.TYPE_BRANCH
-		p2 := p
+		p.Pcond = end
 
+		// MOVQ SP, panic_argp(BX)
 		p = obj.Appendp(ctxt, p)
 		p.As = AMOVQ
 		p.From.Type = obj.TYPE_REG
@@ -843,10 +869,14 @@ func preprocess(ctxt *obj.Link, cursym *obj.LSym) {
 			p.As = AMOVL
 		}
 
+		// JMP end
 		p = obj.Appendp(ctxt, p)
-		p.As = obj.ANOP
-		p1.Pcond = p
-		p2.Pcond = p
+		p.As = obj.AJMP
+		p.To.Type = obj.TYPE_BRANCH
+		p.Pcond = end
+
+		// Reset p for following code.
+		p = end
 	}
 
 	for ; p != nil; p = p.Link {
@@ -953,7 +983,7 @@ func isZeroArgRuntimeCall(s *obj.LSym) bool {
 		return false
 	}
 	switch s.Name {
-	case "runtime.panicindex", "runtime.panicslice", "runtime.panicdivide":
+	case "runtime.panicindex", "runtime.panicslice", "runtime.panicdivide", "runtime.panicwrap":
 		return true
 	}
 	return false

@@ -12,12 +12,14 @@ package runtime
 
 // emitted by compiler, not referred to by go programs
 
+import "unsafe"
+
 func newobject(typ *byte) *any
 func panicindex()
 func panicslice()
 func panicdivide()
 func throwinit()
-func panicwrap(string, string, string)
+func panicwrap()
 
 func gopanic(interface{})
 func gorecover(*int32) interface{}
@@ -59,15 +61,30 @@ func slicestringcopy(to any, fr any) int
 
 // interface conversions
 func convI2I(typ *byte, elem any) (ret any)
+
 func convT2E(typ *byte, elem *any) (ret any)
+func convT2E16(typ *byte, elem *any) (ret any)
+func convT2E32(typ *byte, elem *any) (ret any)
+func convT2E64(typ *byte, elem *any) (ret any)
+func convT2Estring(typ *byte, elem *any) (ret any)
+func convT2Eslice(typ *byte, elem *any) (ret any)
+func convT2Enoptr(typ *byte, elem *any) (ret any)
+
 func convT2I(tab *byte, elem *any) (ret any)
+func convT2I16(tab *byte, elem *any) (ret any)
+func convT2I32(tab *byte, elem *any) (ret any)
+func convT2I64(tab *byte, elem *any) (ret any)
+func convT2Istring(tab *byte, elem *any) (ret any)
+func convT2Islice(tab *byte, elem *any) (ret any)
+func convT2Inoptr(tab *byte, elem *any) (ret any)
 
 // interface type assertions  x.(T)
 func assertE2I(typ *byte, iface any) (ret any)
 func assertE2I2(typ *byte, iface any) (ret any, b bool)
 func assertI2I(typ *byte, iface any) (ret any)
 func assertI2I2(typ *byte, iface any) (ret any, b bool)
-func panicdottype(have, want, iface *byte)
+func panicdottypeE(have, want, iface *byte)
+func panicdottypeI(have, want, iface *byte)
 func panicnildottype(want *byte)
 
 func ifaceeq(i1 any, i2 any) (ret bool)
@@ -99,8 +116,10 @@ func closechan(hchan any)
 
 var writeBarrier struct {
 	enabled bool
+	pad     [3]byte
 	needed  bool
 	cgo     bool
+	alignme uint64
 }
 
 func writebarrierptr(dst *any, src any)
@@ -126,8 +145,8 @@ func makeslice(typ *byte, len int, cap int) (ary []any)
 func makeslice64(typ *byte, len int64, cap int64) (ary []any)
 func growslice(typ *byte, old []any, cap int) (ary []any)
 func memmove(to *any, frm *any, length uintptr)
-func memclrNoHeapPointers(ptr *byte, length uintptr)
-func memclrHasPointers(ptr *byte, length uintptr)
+func memclrNoHeapPointers(ptr unsafe.Pointer, n uintptr)
+func memclrHasPointers(ptr unsafe.Pointer, n uintptr)
 
 func memequal(x, y *any, size uintptr) bool
 func memequal8(x, y *any) bool

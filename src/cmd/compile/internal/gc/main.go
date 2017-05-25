@@ -124,9 +124,14 @@ func Main() {
 	unsafepkg = mkpkg("unsafe")
 	unsafepkg.Name = "unsafe"
 
-	// real package, referred to by generated runtime calls
-	Runtimepkg = mkpkg("runtime")
+	// Pseudo-package that contains the compiler's builtin
+	// declarations for package runtime. These are declared in a
+	// separate package to avoid conflicts with package runtime's
+	// actual declarations, which may differ intentionally but
+	// insignificantly.
+	Runtimepkg = mkpkg("go.runtime")
 	Runtimepkg.Name = "runtime"
+	Runtimepkg.Prefix = "runtime"
 
 	// pseudo-packages used in symbol tables
 	itabpkg = mkpkg("go.itab")
@@ -181,6 +186,7 @@ func Main() {
 	obj.Flagcount("live", "debug liveness analysis", &debuglive)
 	obj.Flagcount("m", "print optimization decisions", &Debug['m'])
 	flag.BoolVar(&flag_msan, "msan", false, "build code compatible with C/C++ memory sanitizer")
+	flag.BoolVar(&dolinkobj, "dolinkobj", true, "generate linker-specific objects; if false, some invalid code may compile")
 	flag.BoolVar(&nolocalimports, "nolocalimports", false, "reject local (relative) imports")
 	flag.StringVar(&outfile, "o", "", "write output to `file`")
 	flag.StringVar(&myimportpath, "p", "", "set expected package import `path`")
@@ -450,38 +456,40 @@ func Main() {
 	timings.Start("fe", "escapes")
 	escapes(xtop)
 
-	// Phase 7: Transform closure bodies to properly reference captured variables.
-	// This needs to happen before walk, because closures must be transformed
-	// before walk reaches a call of a closure.
-	timings.Start("fe", "xclosures")
-	for _, n := range xtop {
-		if n.Op == ODCLFUNC && n.Func.Closure != nil {
-			Curfn = n
-			transformclosure(n)
+	if dolinkobj {
+		// Phase 7: Transform closure bodies to properly reference captured variables.
+		// This needs to happen before walk, because closures must be transformed
+		// before walk reaches a call of a closure.
+		timings.Start("fe", "xclosures")
+		for _, n := range xtop {
+			if n.Op == ODCLFUNC && n.Func.Closure != nil {
+				Curfn = n
+				transformclosure(n)
+			}
 		}
-	}
 
-	Curfn = nil
+		Curfn = nil
 
-	// Phase 8: Compile top level functions.
-	// Don't use range--walk can add functions to xtop.
-	timings.Start("be", "compilefuncs")
-	fcount = 0
-	for i := 0; i < len(xtop); i++ {
-		n := xtop[i]
-		if n.Op == ODCLFUNC {
-			funccompile(n)
-			fcount++
+		// Phase 8: Compile top level functions.
+		// Don't use range--walk can add functions to xtop.
+		timings.Start("be", "compilefuncs")
+		fcount = 0
+		for i := 0; i < len(xtop); i++ {
+			n := xtop[i]
+			if n.Op == ODCLFUNC {
+				funccompile(n)
+				fcount++
+			}
 		}
-	}
-	timings.AddEvent(fcount, "funcs")
+		timings.AddEvent(fcount, "funcs")
 
-	if nsavederrors+nerrors == 0 {
-		fninit(xtop)
-	}
+		if nsavederrors+nerrors == 0 {
+			fninit(xtop)
+		}
 
-	if compiling_runtime {
-		checknowritebarrierrec()
+		if compiling_runtime {
+			checknowritebarrierrec()
+		}
 	}
 
 	// Phase 9: Check external declarations.

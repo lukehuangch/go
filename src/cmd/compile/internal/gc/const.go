@@ -115,9 +115,18 @@ type NilVal struct{}
 // n must be an integer or rune constant.
 func (n *Node) Int64() int64 {
 	if !Isconst(n, CTINT) {
-		Fatalf("Int(%v)", n)
+		Fatalf("Int64(%v)", n)
 	}
 	return n.Val().U.(*Mpint).Int64()
+}
+
+// Bool returns n as a bool.
+// n must be a boolean constant.
+func (n *Node) Bool() bool {
+	if !Isconst(n, CTBOOL) {
+		Fatalf("Bool(%v)", n)
+	}
+	return n.Val().U.(bool)
 }
 
 // truncate float literal fv to 32-bit or 64-bit precision
@@ -710,6 +719,7 @@ func evconst(n *Node) {
 		case OCONV_ | CTINT_,
 			OCONV_ | CTRUNE_,
 			OCONV_ | CTFLT_,
+			OCONV_ | CTCPLX_,
 			OCONV_ | CTSTR_,
 			OCONV_ | CTBOOL_:
 			nl = convlit1(nl, n.Type, true, false)

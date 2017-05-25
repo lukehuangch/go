@@ -6,13 +6,13 @@ package ssa
 
 import (
 	"cmd/internal/obj"
+	"cmd/internal/obj/s390x"
 	"cmd/internal/obj/x86"
 	"cmd/internal/src"
 	"testing"
 )
 
 var CheckFunc = checkFunc
-var PrintFunc = printFunc
 var Opt = opt
 var Deadcode = deadcode
 var Copyelim = copyelim
@@ -20,6 +20,10 @@ var TestCtxt = obj.Linknew(&x86.Linkamd64)
 
 func testConfig(t testing.TB) *Config {
 	return NewConfig("amd64", DummyFrontend{t}, TestCtxt, true)
+}
+
+func testConfigS390X(t testing.TB) *Config {
+	return NewConfig("s390x", DummyFrontend{t}, obj.Linknew(&s390x.Links390x), true)
 }
 
 // DummyFrontend is a test-only frontend.

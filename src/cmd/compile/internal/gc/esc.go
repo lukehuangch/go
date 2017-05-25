@@ -685,11 +685,20 @@ func (e *EscState) esc(n *Node, parent *Node) {
 		e.escassignSinkWhy(n, n, "too large for stack") // TODO category: tooLarge
 	}
 
-	e.esc(n.Left, n)
-	e.esc(n.Right, n)
-	e.esclist(n.Nbody, n)
-	e.esclist(n.List, n)
-	e.esclist(n.Rlist, n)
+	if n.Op == OIF && Isconst(n.Left, CTBOOL) {
+		// Don't examine dead code.
+		if n.Left.Bool() {
+			e.esclist(n.Nbody, n)
+		} else {
+			e.esclist(n.Rlist, n)
+		}
+	} else {
+		e.esc(n.Left, n)
+		e.esc(n.Right, n)
+		e.esclist(n.Nbody, n)
+		e.esclist(n.List, n)
+		e.esclist(n.Rlist, n)
+	}
 
 	if n.Op == OFOR || n.Op == ORANGE {
 		e.loopdepth--
@@ -761,7 +770,7 @@ func (e *EscState) esc(n *Node, parent *Node) {
 	// This assignment is a no-op for escape analysis,
 	// it does not store any new pointers into b that were not already there.
 	// However, without this special case b will escape, because we assign to OIND/ODOTPTR.
-	case OAS, OASOP, OASWB:
+	case OAS, OASOP:
 		if (n.Left.Op == OIND || n.Left.Op == ODOTPTR) && n.Left.Left.Op == ONAME && // dst is ONAME dereference
 			(n.Right.Op == OSLICE || n.Right.Op == OSLICE3 || n.Right.Op == OSLICESTR) && // src is slice operation
 			(n.Right.Left.Op == OIND || n.Right.Left.Op == ODOTPTR) && n.Right.Left.Left.Op == ONAME && // slice is applied to ONAME dereference

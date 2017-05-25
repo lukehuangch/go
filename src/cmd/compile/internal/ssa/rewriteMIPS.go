@@ -50,6 +50,8 @@ func rewriteValueMIPS(v *Value, config *Config) bool {
 		return rewriteValueMIPS_OpAtomicStore32(v, config)
 	case OpAtomicStorePtrNoWB:
 		return rewriteValueMIPS_OpAtomicStorePtrNoWB(v, config)
+	case OpAvg32u:
+		return rewriteValueMIPS_OpAvg32u(v, config)
 	case OpClosureCall:
 		return rewriteValueMIPS_OpClosureCall(v, config)
 	case OpCom16:
@@ -398,6 +400,10 @@ func rewriteValueMIPS(v *Value, config *Config) bool {
 		return rewriteValueMIPS_OpOr8(v, config)
 	case OpOrB:
 		return rewriteValueMIPS_OpOrB(v, config)
+	case OpRound32F:
+		return rewriteValueMIPS_OpRound32F(v, config)
+	case OpRound64F:
+		return rewriteValueMIPS_OpRound64F(v, config)
 	case OpRsh16Ux16:
 		return rewriteValueMIPS_OpRsh16Ux16(v, config)
 	case OpRsh16Ux32:
@@ -988,6 +994,28 @@ func rewriteValueMIPS_OpAtomicStorePtrNoWB(v *Value, config *Config) bool {
 		v.AddArg(ptr)
 		v.AddArg(val)
 		v.AddArg(mem)
+		return true
+	}
+}
+func rewriteValueMIPS_OpAvg32u(v *Value, config *Config) bool {
+	b := v.Block
+	_ = b
+	// match: (Avg32u <t> x y)
+	// cond:
+	// result: (ADD (SRLconst <t> (SUB <t> x y) [1]) y)
+	for {
+		t := v.Type
+		x := v.Args[0]
+		y := v.Args[1]
+		v.reset(OpMIPSADD)
+		v0 := b.NewValue0(v.Pos, OpMIPSSRLconst, t)
+		v0.AuxInt = 1
+		v1 := b.NewValue0(v.Pos, OpMIPSSUB, t)
+		v1.AddArg(x)
+		v1.AddArg(y)
+		v0.AddArg(v1)
+		v.AddArg(v0)
+		v.AddArg(y)
 		return true
 	}
 }
@@ -7036,6 +7064,34 @@ func rewriteValueMIPS_OpOrB(v *Value, config *Config) bool {
 		v.reset(OpMIPSOR)
 		v.AddArg(x)
 		v.AddArg(y)
+		return true
+	}
+}
+func rewriteValueMIPS_OpRound32F(v *Value, config *Config) bool {
+	b := v.Block
+	_ = b
+	// match: (Round32F x)
+	// cond:
+	// result: x
+	for {
+		x := v.Args[0]
+		v.reset(OpCopy)
+		v.Type = x.Type
+		v.AddArg(x)
+		return true
+	}
+}
+func rewriteValueMIPS_OpRound64F(v *Value, config *Config) bool {
+	b := v.Block
+	_ = b
+	// match: (Round64F x)
+	// cond:
+	// result: x
+	for {
+		x := v.Args[0]
+		v.reset(OpCopy)
+		v.Type = x.Type
+		v.AddArg(x)
 		return true
 	}
 }

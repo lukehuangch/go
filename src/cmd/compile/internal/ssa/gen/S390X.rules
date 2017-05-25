@@ -60,7 +60,8 @@
 (Mod8   x y) -> (MODW  (MOVBreg x) (MOVBreg y))
 (Mod8u  x y) -> (MODWU (MOVBZreg x) (MOVBZreg y))
 
-(Avg64u <t> x y) -> (ADD (ADD <t> (SRDconst <t> x [1]) (SRDconst <t> y [1])) (ANDconst <t> (AND <t> x y) [1]))
+// (x + y) / 2 with x>=y -> (x - y) / 2 + y
+(Avg64u <t> x y) -> (ADD (SRDconst <t> (SUB <t> x y) [1]) y)
 
 (And64 x y) -> (AND x y)
 (And32 x y) -> (ANDW x y)
@@ -176,6 +177,9 @@
 
 (Cvt32Fto64F x) -> (LDEBR x)
 (Cvt64Fto32F x) -> (LEDBR x)
+
+(Round32F x) -> (LoweredRound32F x)
+(Round64F x) -> (LoweredRound64F x)
 
 // Lowering shifts
 // Unsigned shifts need to return 0 if shift amount is >= width of shifted value.
@@ -437,7 +441,7 @@
 (If (MOVDGTnoinv (MOVDconst [0]) (MOVDconst [1]) cmp) yes no) -> (GTF cmp yes no)
 (If (MOVDGEnoinv (MOVDconst [0]) (MOVDconst [1]) cmp) yes no) -> (GEF cmp yes no)
 
-(If cond yes no) -> (NE (CMPWconst [0] (MOVBZreg cond)) yes no)
+(If cond yes no) -> (NE (CMPWconst [0] (MOVBZreg <config.fe.TypeBool()> cond)) yes no)
 
 // ***************************
 // Above: lowering rules
@@ -445,9 +449,51 @@
 // ***************************
 // TODO: Should the optimizations be a separate pass?
 
-// if a register move has only 1 use, just use the same register without emitting instruction
+// Fold unnecessary type conversions.
+(MOVDreg <t> x) && t.Compare(x.Type) == CMPeq -> x
+(MOVDnop <t> x) && t.Compare(x.Type) == CMPeq -> x
+
+// Propagate constants through type conversions.
+(MOVDreg (MOVDconst [c])) -> (MOVDconst [c])
+(MOVDnop (MOVDconst [c])) -> (MOVDconst [c])
+
+// If a register move has only 1 use, just use the same register without emitting instruction.
 // MOVDnop doesn't emit instruction, only for ensuring the type.
 (MOVDreg x) && x.Uses == 1 -> (MOVDnop x)
+
+// Fold type changes into loads.
+(MOVDreg <t> x:(MOVBZload [off] {sym} ptr mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVBZload <t> [off] {sym} ptr mem)
+(MOVDreg <t> x:(MOVBload  [off] {sym} ptr mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVBload  <t> [off] {sym} ptr mem)
+(MOVDreg <t> x:(MOVHZload [off] {sym} ptr mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVHZload <t> [off] {sym} ptr mem)
+(MOVDreg <t> x:(MOVHload  [off] {sym} ptr mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVHload  <t> [off] {sym} ptr mem)
+(MOVDreg <t> x:(MOVWZload [off] {sym} ptr mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVWZload <t> [off] {sym} ptr mem)
+(MOVDreg <t> x:(MOVWload  [off] {sym} ptr mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVWload  <t> [off] {sym} ptr mem)
+(MOVDreg <t> x:(MOVDload  [off] {sym} ptr mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVDload  <t> [off] {sym} ptr mem)
+
+(MOVDnop <t> x:(MOVBZload [off] {sym} ptr mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVBZload <t> [off] {sym} ptr mem)
+(MOVDnop <t> x:(MOVBload  [off] {sym} ptr mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVBload  <t> [off] {sym} ptr mem)
+(MOVDnop <t> x:(MOVHZload [off] {sym} ptr mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVHZload <t> [off] {sym} ptr mem)
+(MOVDnop <t> x:(MOVHload  [off] {sym} ptr mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVHload  <t> [off] {sym} ptr mem)
+(MOVDnop <t> x:(MOVWZload [off] {sym} ptr mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVWZload <t> [off] {sym} ptr mem)
+(MOVDnop <t> x:(MOVWload  [off] {sym} ptr mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVWload  <t> [off] {sym} ptr mem)
+(MOVDnop <t> x:(MOVDload  [off] {sym} ptr mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVDload  <t> [off] {sym} ptr mem)
+
+// TODO(mundaym): uncomment rules once signed indexed loads are added.
+(MOVDreg <t> x:(MOVBZloadidx [off] {sym} ptr idx mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVBZloadidx <t> [off] {sym} ptr idx mem)
+//(MOVDreg <t> x:(MOVBloadidx  [off] {sym} ptr idx mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVBloadidx  <t> [off] {sym} ptr idx mem)
+(MOVDreg <t> x:(MOVHZloadidx [off] {sym} ptr idx mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVHZloadidx <t> [off] {sym} ptr idx mem)
+//(MOVDreg <t> x:(MOVHloadidx  [off] {sym} ptr idx mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVHloadidx  <t> [off] {sym} ptr idx mem)
+(MOVDreg <t> x:(MOVWZloadidx [off] {sym} ptr idx mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVWZloadidx <t> [off] {sym} ptr idx mem)
+//(MOVDreg <t> x:(MOVWloadidx  [off] {sym} ptr idx mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVWloadidx  <t> [off] {sym} ptr idx mem)
+(MOVDreg <t> x:(MOVDloadidx  [off] {sym} ptr idx mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVDloadidx  <t> [off] {sym} ptr idx mem)
+
+(MOVDnop <t> x:(MOVBZloadidx [off] {sym} ptr idx mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVBZloadidx <t> [off] {sym} ptr idx mem)
+//(MOVDnop <t> x:(MOVBloadidx  [off] {sym} ptr idx mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVBloadidx  <t> [off] {sym} ptr idx mem)
+(MOVDnop <t> x:(MOVHZloadidx [off] {sym} ptr idx mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVHZloadidx <t> [off] {sym} ptr idx mem)
+//(MOVDnop <t> x:(MOVHloadidx  [off] {sym} ptr idx mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVHloadidx  <t> [off] {sym} ptr idx mem)
+(MOVDnop <t> x:(MOVWZloadidx [off] {sym} ptr idx mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVWZloadidx <t> [off] {sym} ptr idx mem)
+//(MOVDnop <t> x:(MOVWloadidx  [off] {sym} ptr idx mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVWloadidx  <t> [off] {sym} ptr idx mem)
+(MOVDnop <t> x:(MOVDloadidx  [off] {sym} ptr idx mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVDloadidx  <t> [off] {sym} ptr idx mem)
 
 // Fold sign extensions into conditional moves of constants.
 // Designed to remove the MOVBZreg inserted by the If lowering.
@@ -660,9 +706,9 @@
 (MOVWZreg x:(MOVWZloadidx [off] {sym} ptr idx mem)) && x.Uses == 1 && clobber(x) -> @x.Block (MOVWZloadidx <v.Type> [off] {sym} ptr idx mem)
 
 // replace load from same location as preceding store with copy
-(MOVBZload [off] {sym} ptr (MOVBstore [off2] {sym2} ptr2 x _)) && sym == sym2 && off == off2 && isSamePtr(ptr, ptr2) -> (MOVDreg x)
-(MOVHZload [off] {sym} ptr (MOVHstore [off2] {sym2} ptr2 x _)) && sym == sym2 && off == off2 && isSamePtr(ptr, ptr2) -> (MOVDreg x)
-(MOVWZload [off] {sym} ptr (MOVWstore [off2] {sym2} ptr2 x _)) && sym == sym2 && off == off2 && isSamePtr(ptr, ptr2) -> (MOVDreg x)
+(MOVBZload [off] {sym} ptr (MOVBstore [off2] {sym2} ptr2 x _)) && sym == sym2 && off == off2 && isSamePtr(ptr, ptr2) -> (MOVBZreg x)
+(MOVHZload [off] {sym} ptr (MOVHstore [off2] {sym2} ptr2 x _)) && sym == sym2 && off == off2 && isSamePtr(ptr, ptr2) -> (MOVHZreg x)
+(MOVWZload [off] {sym} ptr (MOVWstore [off2] {sym2} ptr2 x _)) && sym == sym2 && off == off2 && isSamePtr(ptr, ptr2) -> (MOVWZreg x)
 (MOVDload [off] {sym} ptr (MOVDstore [off2] {sym2} ptr2 x _)) && sym == sym2 && off == off2 && isSamePtr(ptr, ptr2) -> (MOVDreg x)
 
 // Don't extend before storing
@@ -967,6 +1013,8 @@
 (XOR (MOVDconst [c]) (MOVDconst [d])) -> (MOVDconst [c^d])
 (XORconst [c] (MOVDconst [d])) -> (MOVDconst [c^d])
 (XORWconst [c] (MOVDconst [d])) -> (MOVDconst [c^d])
+(LoweredRound32F x:(FMOVSconst)) -> x
+(LoweredRound64F x:(FMOVDconst)) -> x
 
 // generic simplifications
 // TODO: more of this
@@ -980,6 +1028,14 @@
 (ORW x x) -> x
 (XOR x x) -> (MOVDconst [0])
 (XORW x x) -> (MOVDconst [0])
+
+// fused multiply-add
+(FADD x (FMUL y z)) -> (FMADD x y z)
+(FADDS x (FMULS y z)) -> (FMADDS x y z)
+(FADD (FMUL y z) x) -> (FMADD x y z)
+(FADDS (FMULS y z) x) -> (FMADDS x y z)
+(FSUB (FMUL y z) x) -> (FMSUB x y z)
+(FSUBS (FMULS y z) x) -> (FMSUBS x y z)
 
 // Fold memory operations into operations.
 // Exclude global data (SB) because these instructions cannot handle relative addresses.
@@ -1257,6 +1313,10 @@
   && x.Uses == 1
   && clobber(x)
   -> (MOVDBRstoreidx [i-4] {s} p idx w0 mem)
+
+// Move shifts to second argument of ORs.  Helps load combining rules below.
+(ORW x:(SLWconst _) y) && y.Op != OpS390XSLWconst -> (ORW y x)
+(OR  x:(SLDconst _) y) && y.Op != OpS390XSLDconst -> (OR  y x)
 
 // Combining byte loads into larger (unaligned) loads.
 

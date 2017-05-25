@@ -625,6 +625,19 @@ func TestMap(t *testing.T) {
 		(*reflect.StringHeader)(unsafe.Pointer(&m)).Data {
 		t.Error("unexpected copy during identity map")
 	}
+
+	// 7. Handle invalid UTF-8 sequence
+	replaceNotLatin := func(r rune) rune {
+		if unicode.Is(unicode.Latin, r) {
+			return r
+		}
+		return '?'
+	}
+	m = Map(replaceNotLatin, "Hello\255World")
+	expect = "Hello?World"
+	if m != expect {
+		t.Errorf("replace invalid sequence: expected %q got %q", expect, m)
+	}
 }
 
 func TestToUpper(t *testing.T) { runStringTests(t, ToUpper, "ToUpper", upperTests) }
@@ -1476,21 +1489,33 @@ func BenchmarkFieldsFunc(b *testing.B) {
 	}
 }
 
-func BenchmarkSplit1(b *testing.B) {
+func BenchmarkSplitEmptySeparator(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		Split(benchInputHard, "")
 	}
 }
 
-func BenchmarkSplit2(b *testing.B) {
+func BenchmarkSplitSingleByteSeparator(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		Split(benchInputHard, "/")
 	}
 }
 
-func BenchmarkSplit3(b *testing.B) {
+func BenchmarkSplitMultiByteSeparator(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		Split(benchInputHard, "hello")
+	}
+}
+
+func BenchmarkSplitNSingleByteSeparator(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		SplitN(benchInputHard, "/", 10)
+	}
+}
+
+func BenchmarkSplitNMultiByteSeparator(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		SplitN(benchInputHard, "hello", 10)
 	}
 }
 

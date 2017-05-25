@@ -156,6 +156,10 @@ func walkrange(n *Node) {
 		v2 = n.List.Second()
 	}
 
+	if v1 == nil && v2 != nil {
+		Fatalf("walkrange: v2 != nil while v1 == nil")
+	}
+
 	// n.List has no meaning anymore, clear it
 	// to avoid erroneous processing by racewalk.
 	n.List.Set(nil)
@@ -196,8 +200,8 @@ func walkrange(n *Node) {
 			body = []*Node{nod(OAS, v1, hv1)}
 		} else {
 			a := nod(OAS2, nil, nil)
-			a.List.Set([]*Node{v1, v2})
-			a.Rlist.Set([]*Node{hv1, nod(OIND, hp, nil)})
+			a.List.Set2(v1, v2)
+			a.Rlist.Set2(hv1, nod(OIND, hp, nil))
 			body = []*Node{a}
 
 			// Advance pointer as part of increment.
@@ -251,8 +255,8 @@ func walkrange(n *Node) {
 			val := nodSym(ODOT, hit, valsym)
 			val = nod(OIND, val, nil)
 			a := nod(OAS2, nil, nil)
-			a.List.Set([]*Node{v1, v2})
-			a.Rlist.Set([]*Node{key, val})
+			a.List.Set2(v1, v2)
+			a.Rlist.Set2(key, val)
 			body = []*Node{a}
 		}
 
@@ -272,7 +276,7 @@ func walkrange(n *Node) {
 		n.Left = nod(ONE, hb, nodbool(false))
 		a := nod(OAS2RECV, nil, nil)
 		a.Typecheck = 1
-		a.List.Set([]*Node{hv1, hb})
+		a.List.Set2(hv1, hb)
 		a.Rlist.Set1(nod(ORECV, ha, nil))
 		n.Left.Ninit.Set1(a)
 		if v1 == nil {
@@ -290,14 +294,14 @@ func walkrange(n *Node) {
 		//
 		// ha := a
 		// for hv1 := 0; hv1 < len(ha); {
-		//   v1 = hv1
+		//   hv1t := hv1
 		//   hv2 := rune(ha[hv1])
 		//   if hv2 < utf8.RuneSelf {
 		//      hv1++
 		//   } else {
 		//      hv2, hv1 = decoderune(ha, hv1)
 		//   }
-		//   v2 = hv2
+		//   v1, v2 = hv1t, hv2
 		//   // original body
 		// }
 
@@ -305,6 +309,7 @@ func walkrange(n *Node) {
 		ha := a
 
 		hv1 := temp(Types[TINT])
+		hv1t := temp(Types[TINT])
 		hv2 := temp(runetype)
 
 		// hv1 := 0
@@ -314,18 +319,18 @@ func walkrange(n *Node) {
 		n.Left = nod(OLT, hv1, nod(OLEN, ha, nil))
 
 		if v1 != nil {
-			// v1 = hv1
-			body = append(body, nod(OAS, v1, hv1))
+			// hv1t = hv1
+			body = append(body, nod(OAS, hv1t, hv1))
 		}
 
-		// hv2 := ha[hv1]
+		// hv2 := rune(ha[hv1])
 		nind := nod(OINDEX, ha, hv1)
 		nind.Bounded = true
 		body = append(body, nod(OAS, hv2, conv(nind, runetype)))
 
 		// if hv2 < utf8.RuneSelf
 		nif := nod(OIF, nil, nil)
-		nif.Left = nod(OLT, nind, nodintconst(utf8.RuneSelf))
+		nif.Left = nod(OLT, hv2, nodintconst(utf8.RuneSelf))
 
 		// hv1++
 		nif.Nbody.Set1(nod(OAS, hv1, nod(OADD, hv1, nodintconst(1))))
@@ -341,9 +346,17 @@ func walkrange(n *Node) {
 
 		body = append(body, nif)
 
-		if v2 != nil {
-			// v2 = hv2
-			body = append(body, nod(OAS, v2, hv2))
+		if v1 != nil {
+			if v2 != nil {
+				// v1, v2 = hv1t, hv2
+				a := nod(OAS2, nil, nil)
+				a.List.Set2(v1, v2)
+				a.Rlist.Set2(hv1t, hv2)
+				body = append(body, a)
+			} else {
+				// v1 = hv1t
+				body = append(body, nod(OAS, v1, hv1t))
+			}
 		}
 	}
 
@@ -406,13 +419,13 @@ func memclrrange(n, v1, v2, a *Node) bool {
 	n.Left = nod(ONE, nod(OLEN, a, nil), nodintconst(0))
 
 	// hp = &a[0]
-	hp := temp(ptrto(Types[TUINT8]))
+	hp := temp(Types[TUNSAFEPTR])
 
 	tmp := nod(OINDEX, a, nodintconst(0))
 	tmp.Bounded = true
 	tmp = nod(OADDR, tmp, nil)
 	tmp = nod(OCONVNOP, tmp, nil)
-	tmp.Type = ptrto(Types[TUINT8])
+	tmp.Type = Types[TUNSAFEPTR]
 	n.Nbody.Append(nod(OAS, hp, tmp))
 
 	// hn = len(a) * sizeof(elem(a))

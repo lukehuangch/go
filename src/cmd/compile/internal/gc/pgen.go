@@ -306,7 +306,8 @@ func compile(fn *Node) {
 		panicslice = Sysfunc("panicslice")
 		panicdivide = Sysfunc("panicdivide")
 		growslice = Sysfunc("growslice")
-		panicdottype = Sysfunc("panicdottype")
+		panicdottypeE = Sysfunc("panicdottypeE")
+		panicdottypeI = Sysfunc("panicdottypeI")
 		panicnildottype = Sysfunc("panicnildottype")
 		assertE2I = Sysfunc("assertE2I")
 		assertE2I2 = Sysfunc("assertE2I2")
@@ -367,7 +368,10 @@ func compile(fn *Node) {
 		return
 	}
 
-	newplist()
+	plist := new(obj.Plist)
+	pc = Ctxt.NewProg()
+	Clearp(pc)
+	plist.Firstpc = pc
 
 	setlineno(Curfn)
 
@@ -397,6 +401,9 @@ func compile(fn *Node) {
 	}
 	if fn.Func.Pragma&Systemstack != 0 {
 		ptxt.From.Sym.Set(obj.AttrCFunc, true)
+		if fn.Func.Pragma&Nosplit != 0 {
+			yyerror("go:nosplit and go:systemstack cannot be combined")
+		}
 	}
 
 	// Clumsy but important.
@@ -426,6 +433,7 @@ func compile(fn *Node) {
 
 	genssa(ssafn, ptxt, gcargs, gclocals)
 	ssafn.Free()
+	obj.Flushplist(Ctxt, plist) // convert from Prog list to machine code
 }
 
 func gendebug(fn *obj.LSym, decls []*Node) {
@@ -438,7 +446,7 @@ func gendebug(fn *obj.LSym, decls []*Node) {
 			continue
 		}
 
-		var name int16
+		var name obj.AddrName
 		switch n.Class {
 		case PAUTO:
 			if !n.Used {

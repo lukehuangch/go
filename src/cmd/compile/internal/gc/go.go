@@ -27,6 +27,14 @@ type Pkg struct {
 	Syms     map[string]*Sym
 }
 
+// isRuntime reports whether p is package runtime.
+func (p *Pkg) isRuntime() bool {
+	if compiling_runtime && p == localpkg {
+		return true
+	}
+	return p.Path == "runtime"
+}
+
 // Sym represents an object name. Most commonly, this is a Go identifier naming
 // an object declared within a package, but Syms are also used to name internal
 // synthesized objects.
@@ -118,6 +126,7 @@ var pragcgobuf string
 
 var outfile string
 var linkobj string
+var dolinkobj bool
 
 var bout *bio.Writer
 
@@ -152,7 +161,7 @@ var itabpkg *Pkg // fake pkg for itab entries
 
 var itablinkpkg *Pkg // fake package for runtime itab entries
 
-var Runtimepkg *Pkg // package runtime
+var Runtimepkg *Pkg // fake package runtime
 
 var racepkg *Pkg // package runtime/race
 
@@ -376,7 +385,8 @@ var (
 	panicslice,
 	panicdivide,
 	growslice,
-	panicdottype,
+	panicdottypeE,
+	panicdottypeI,
 	panicnildottype,
 	assertE2I,
 	assertE2I2,

@@ -347,7 +347,7 @@ func BuildModeInit() {
 			codegenArg = "-fPIC"
 		} else {
 			switch platform {
-			case "linux/amd64", "linux/arm", "linux/arm64", "linux/386",
+			case "linux/amd64", "linux/arm", "linux/arm64", "linux/386", "linux/s390x",
 				"android/amd64", "android/arm", "android/arm64", "android/386":
 			default:
 				base.Fatalf("-buildmode=plugin not supported on %s\n", platform)
@@ -1655,6 +1655,15 @@ func (b *Builder) moveOrCopyFile(a *Action, dst, src string, perm os.FileMode, f
 	// If we can update the mode and rename to the dst, do it.
 	// Otherwise fall back to standard copy.
 
+	// If the destination directory has the group sticky bit set,
+	// we have to copy the file to retain the correct permissions.
+	// https://golang.org/issue/18878
+	if fi, err := os.Stat(filepath.Dir(dst)); err == nil {
+		if fi.IsDir() && (fi.Mode()&os.ModeSetgid) != 0 {
+			return b.copyFile(a, dst, src, perm, force)
+		}
+	}
+
 	// The perm argument is meant to be adjusted according to umask,
 	// but we don't know what the umask is.
 	// Create a dummy file to find out.
@@ -2180,7 +2189,7 @@ func (gcToolchain) gc(b *Builder, p *load.Package, archive, obj string, asmhdr b
 	extFiles := len(p.CgoFiles) + len(p.CFiles) + len(p.CXXFiles) + len(p.MFiles) + len(p.FFiles) + len(p.SFiles) + len(p.SysoFiles) + len(p.SwigFiles) + len(p.SwigCXXFiles)
 	if p.Standard {
 		switch p.ImportPath {
-		case "bytes", "net", "os", "runtime/pprof", "sync", "time":
+		case "bytes", "internal/poll", "net", "os", "runtime/pprof", "sync", "syscall", "time":
 			extFiles++
 		}
 	}

@@ -12,6 +12,8 @@
 
 package net
 
+import _ "unsafe" // for go:linkname
+
 // IP address lengths (bytes).
 const (
 	IPv4len = 4
@@ -338,7 +340,8 @@ func ipEmptyString(ip IP) string {
 }
 
 // MarshalText implements the encoding.TextMarshaler interface.
-// The encoding is the same as returned by String.
+// The encoding is the same as returned by String, with one exception:
+// When len(ip) is zero, it returns an empty slice.
 func (ip IP) MarshalText() ([]byte, error) {
 	if len(ip) == 0 {
 		return []byte(""), nil
@@ -381,17 +384,9 @@ func (ip IP) Equal(x IP) bool {
 	return false
 }
 
-func bytesEqual(x, y []byte) bool {
-	if len(x) != len(y) {
-		return false
-	}
-	for i, b := range x {
-		if y[i] != b {
-			return false
-		}
-	}
-	return true
-}
+// bytes.Equal is implemented in runtime/asm_$goarch.s
+//go:linkname bytesEqual bytes.Equal
+func bytesEqual(x, y []byte) bool
 
 func (ip IP) matchAddrFamily(x IP) bool {
 	return ip.To4() != nil && x.To4() != nil || ip.To16() != nil && ip.To4() == nil && x.To16() != nil && x.To4() == nil

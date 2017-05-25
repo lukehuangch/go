@@ -31,6 +31,8 @@
 
 (Mul32uhilo x y) -> (MULLQU x y)
 
+(Avg32u x y) -> (AVGLU x y)
+
 (Div32F x y) -> (DIVSS x y)
 (Div64F x y) -> (DIVSD x y)
 
@@ -119,6 +121,9 @@
 
 (Cvt32Fto64F x) -> (CVTSS2SD x)
 (Cvt64Fto32F x) -> (CVTSD2SS x)
+
+(Round32F x) -> x
+(Round64F x) -> x
 
 // Lowering shifts
 // Unsigned shifts need to return 0 if shift amount is >= width of shifted value.
@@ -1130,6 +1135,9 @@
 (CMPLconst x [0]) -> (TESTL x x)
 (CMPWconst x [0]) -> (TESTW x x)
 (CMPBconst x [0]) -> (TESTB x x)
+
+// Move shifts to second argument of ORs.  Helps load combining rules below.
+(ORL x:(SHLLconst _) y) && y.Op != Op386SHLLconst -> (ORL y x)
 
 // Combining byte loads into larger (unaligned) loads.
 // There are many ways these combinations could occur.  This is

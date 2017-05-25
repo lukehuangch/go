@@ -1243,7 +1243,7 @@ OpSwitch:
 		}
 
 		if n.List.Len() == 1 && !n.Isddd {
-			n.List.SetIndex(0, typecheck(n.List.Index(0), Erv|Efnstruct))
+			n.List.SetFirst(typecheck(n.List.First(), Erv|Efnstruct))
 		} else {
 			typecheckslice(n.List.Slice(), Erv)
 		}
@@ -1289,7 +1289,7 @@ OpSwitch:
 		if t.Results().NumFields() == 1 {
 			n.Type = l.Type.Results().Field(0).Type
 
-			if n.Op == OCALLFUNC && n.Left.Op == ONAME && (compiling_runtime || n.Left.Sym.Pkg == Runtimepkg) && n.Left.Sym.Name == "getg" {
+			if n.Op == OCALLFUNC && n.Left.Op == ONAME && n.Left.Sym.Pkg.isRuntime() && n.Left.Sym.Name == "getg" {
 				// Emit code for runtime.getg() directly instead of calling function.
 				// Most such rewrites (for example the similar one for math.Sqrt) should be done in walk,
 				// so that the ordering pass can make sure to preserve the semantics of the original code
@@ -1321,7 +1321,7 @@ OpSwitch:
 
 		// any side effects disappear; ignore init
 		var r Node
-		Nodconst(&r, Types[TUINTPTR], evalunsafe(n))
+		nodconst(&r, Types[TUINTPTR], evalunsafe(n))
 		r.Orig = n
 		n = &r
 
@@ -1376,7 +1376,7 @@ OpSwitch:
 		case TSTRING:
 			if Isconst(l, CTSTR) {
 				var r Node
-				Nodconst(&r, Types[TINT], int64(len(l.Val().U.(string))))
+				nodconst(&r, Types[TINT], int64(len(l.Val().U.(string))))
 				r.Orig = n
 				n = &r
 			}
@@ -1386,7 +1386,7 @@ OpSwitch:
 				break
 			}
 			var r Node
-			Nodconst(&r, Types[TINT], t.NumElem())
+			nodconst(&r, Types[TINT], t.NumElem())
 			r.Orig = n
 			n = &r
 		}
@@ -1539,7 +1539,7 @@ OpSwitch:
 			return n
 		}
 
-		args.SetIndex(1, assignconv(r, l.Type.Key(), "delete"))
+		args.SetSecond(assignconv(r, l.Type.Key(), "delete"))
 		break OpSwitch
 
 	case OAPPEND:
@@ -1552,7 +1552,7 @@ OpSwitch:
 		}
 
 		if args.Len() == 1 && !n.Isddd {
-			args.SetIndex(0, typecheck(args.Index(0), Erv|Efnstruct))
+			args.SetFirst(typecheck(args.First(), Erv|Efnstruct))
 		} else {
 			typecheckslice(args.Slice(), Erv)
 		}
@@ -1597,11 +1597,11 @@ OpSwitch:
 			}
 
 			if t.Elem().IsKind(TUINT8) && args.Second().Type.IsString() {
-				args.SetIndex(1, defaultlit(args.Index(1), Types[TSTRING]))
+				args.SetSecond(defaultlit(args.Second(), Types[TSTRING]))
 				break OpSwitch
 			}
 
-			args.SetIndex(1, assignconv(args.Index(1), t.Orig, "append"))
+			args.SetSecond(assignconv(args.Second(), t.Orig, "append"))
 			break OpSwitch
 		}
 
@@ -1716,6 +1716,13 @@ OpSwitch:
 				*r = *n
 				n.Op = OLITERAL
 				n.SetVal(n.Left.Val())
+			} else if t.Etype == n.Type.Etype {
+				switch t.Etype {
+				case TFLOAT32, TFLOAT64, TCOMPLEX64, TCOMPLEX128:
+					// Floating point casts imply rounding and
+					// so the conversion must be kept.
+					n.Op = OCONV
+				}
 			}
 
 		// do not use stringtoarraylit.
@@ -2700,17 +2707,18 @@ out:
 
 notenough:
 	if n == nil || !n.Diag {
+		details := errorDetails(nl, tstruct, isddd)
 		if call != nil {
 			// call is the expression being called, not the overall call.
 			// Method expressions have the form T.M, and the compiler has
 			// rewritten those to ONAME nodes but left T in Left.
 			if call.Op == ONAME && call.Left != nil && call.Left.Op == OTYPE {
-				yyerror("not enough arguments in call to method expression %v\n\thave %s\n\twant %v", call, nl.retsigerr(isddd), tstruct)
+				yyerror("not enough arguments in call to method expression %v%s", call, details)
 			} else {
-				yyerror("not enough arguments in call to %v\n\thave %s\n\twant %v", call, nl.retsigerr(isddd), tstruct)
+				yyerror("not enough arguments in call to %v%s", call, details)
 			}
 		} else {
-			yyerror("not enough arguments to %v\n\thave %s\n\twant %v", op, nl.retsigerr(isddd), tstruct)
+			yyerror("not enough arguments to %v%s", op, details)
 		}
 		if n != nil {
 			n.Diag = true
@@ -2720,12 +2728,28 @@ notenough:
 	goto out
 
 toomany:
+	details := errorDetails(nl, tstruct, isddd)
 	if call != nil {
-		yyerror("too many arguments in call to %v\n\thave %s\n\twant %v", call, nl.retsigerr(isddd), tstruct)
+		yyerror("too many arguments in call to %v%s", call, details)
 	} else {
-		yyerror("too many arguments to %v\n\thave %s\n\twant %v", op, nl.retsigerr(isddd), tstruct)
+		yyerror("too many arguments to %v%s", op, details)
 	}
 	goto out
+}
+
+func errorDetails(nl Nodes, tstruct *Type, isddd bool) string {
+	// If we don't know any type at a call site, let's suppress any return
+	// message signatures. See Issue https://golang.org/issues/19012.
+	if tstruct == nil {
+		return ""
+	}
+	// If any node has an unknown type, suppress it as well
+	for _, n := range nl.Slice() {
+		if n.Type == nil {
+			return ""
+		}
+	}
+	return fmt.Sprintf("\n\thave %s\n\twant %v", nl.retsigerr(isddd), tstruct)
 }
 
 // sigrepr is a type's representation to the outside world,
@@ -2882,10 +2906,7 @@ func typecheckcomplit(n *Node) *Node {
 	}()
 
 	if n.Right == nil {
-		if n.List.Len() != 0 {
-			setlineno(n.List.First())
-		}
-		yyerror("missing type in composite literal")
+		yyerrorl(n.Pos, "missing type in composite literal")
 		n.Type = nil
 		return n
 	}
@@ -3199,8 +3220,8 @@ func checkassign(stmt *Node, n *Node) {
 		return
 	}
 
-	// have already complained about n being undefined
-	if n.Op == ONONAME {
+	// have already complained about n being invalid
+	if n.Type == nil {
 		return
 	}
 
@@ -3314,7 +3335,7 @@ func typecheckas2(n *Node) {
 	cl := n.List.Len()
 	cr := n.Rlist.Len()
 	if cl > 1 && cr == 1 {
-		n.Rlist.SetIndex(0, typecheck(n.Rlist.Index(0), Erv|Efnstruct))
+		n.Rlist.SetFirst(typecheck(n.Rlist.First(), Erv|Efnstruct))
 	} else {
 		typecheckslice(n.Rlist.Slice(), Erv)
 	}

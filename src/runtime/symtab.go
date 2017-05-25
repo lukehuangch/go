@@ -168,7 +168,9 @@ func (f *Func) raw() *_func {
 	return (*_func)(unsafe.Pointer(f))
 }
 
-// funcdata.h
+// PCDATA and FUNCDATA table indexes.
+//
+// See funcdata.h and ../cmd/internal/obj/funcdata.go.
 const (
 	_PCDATA_StackMapIndex       = 0
 	_FUNCDATA_ArgsPointerMaps   = 0
@@ -549,7 +551,7 @@ func pcvalue(f *_func, off int32, targetpc uintptr, cache *pcvalueCache, strict 
 			// a recursive stack's cycle is slightly
 			// larger than the cache.
 			if cache != nil {
-				ci := fastrand() % uint32(len(cache.entries))
+				ci := fastrandn(uint32(len(cache.entries)))
 				cache.entries[ci] = pcvalueCacheEnt{
 					targetpc: targetpc,
 					off:      off,

@@ -236,6 +236,8 @@ func rewriteValue386(v *Value, config *Config) bool {
 		return rewriteValue386_OpAnd8(v, config)
 	case OpAndB:
 		return rewriteValue386_OpAndB(v, config)
+	case OpAvg32u:
+		return rewriteValue386_OpAvg32u(v, config)
 	case OpBswap32:
 		return rewriteValue386_OpBswap32(v, config)
 	case OpClosureCall:
@@ -486,6 +488,10 @@ func rewriteValue386(v *Value, config *Config) bool {
 		return rewriteValue386_OpOr8(v, config)
 	case OpOrB:
 		return rewriteValue386_OpOrB(v, config)
+	case OpRound32F:
+		return rewriteValue386_OpRound32F(v, config)
+	case OpRound64F:
+		return rewriteValue386_OpRound64F(v, config)
 	case OpRsh16Ux16:
 		return rewriteValue386_OpRsh16Ux16(v, config)
 	case OpRsh16Ux32:
@@ -7465,6 +7471,23 @@ func rewriteValue386_Op386ORL(v *Value, config *Config) bool {
 		v.AddArg(x)
 		return true
 	}
+	// match: (ORL x:(SHLLconst _) y)
+	// cond: y.Op != Op386SHLLconst
+	// result: (ORL y x)
+	for {
+		x := v.Args[0]
+		if x.Op != Op386SHLLconst {
+			break
+		}
+		y := v.Args[1]
+		if !(y.Op != Op386SHLLconst) {
+			break
+		}
+		v.reset(Op386ORL)
+		v.AddArg(y)
+		v.AddArg(x)
+		return true
+	}
 	// match: (ORL                  x0:(MOVBload [i]   {s} p mem)     s0:(SHLLconst [8] x1:(MOVBload [i+1] {s} p mem)))
 	// cond: x0.Uses == 1   && x1.Uses == 1   && s0.Uses == 1   && mergePoint(b,x0,x1) != nil   && clobber(x0)   && clobber(x1)   && clobber(s0)
 	// result: @mergePoint(b,x0,x1) (MOVWload [i] {s} p mem)
@@ -9692,6 +9715,21 @@ func rewriteValue386_OpAndB(v *Value, config *Config) bool {
 		x := v.Args[0]
 		y := v.Args[1]
 		v.reset(Op386ANDL)
+		v.AddArg(x)
+		v.AddArg(y)
+		return true
+	}
+}
+func rewriteValue386_OpAvg32u(v *Value, config *Config) bool {
+	b := v.Block
+	_ = b
+	// match: (Avg32u x y)
+	// cond:
+	// result: (AVGLU x y)
+	for {
+		x := v.Args[0]
+		y := v.Args[1]
+		v.reset(Op386AVGLU)
 		v.AddArg(x)
 		v.AddArg(y)
 		return true
@@ -12172,6 +12210,34 @@ func rewriteValue386_OpOrB(v *Value, config *Config) bool {
 		v.reset(Op386ORL)
 		v.AddArg(x)
 		v.AddArg(y)
+		return true
+	}
+}
+func rewriteValue386_OpRound32F(v *Value, config *Config) bool {
+	b := v.Block
+	_ = b
+	// match: (Round32F x)
+	// cond:
+	// result: x
+	for {
+		x := v.Args[0]
+		v.reset(OpCopy)
+		v.Type = x.Type
+		v.AddArg(x)
+		return true
+	}
+}
+func rewriteValue386_OpRound64F(v *Value, config *Config) bool {
+	b := v.Block
+	_ = b
+	// match: (Round64F x)
+	// cond:
+	// result: x
+	for {
+		x := v.Args[0]
+		v.reset(OpCopy)
+		v.Type = x.Type
+		v.AddArg(x)
 		return true
 	}
 }

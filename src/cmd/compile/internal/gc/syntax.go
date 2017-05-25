@@ -65,7 +65,6 @@ type Node struct {
 	Walkdef   uint8 // tracks state during typecheckdef; 2 == loop detected
 	Typecheck uint8 // tracks state during typechecking; 2 == loop detected
 	Local     bool  // type created in this file (see also Type.Local); TODO(gri): move this into flags
-	IsStatic  bool  // whether this Node will be converted to purely static data
 	Initorder uint8
 	Used      bool // for variable/label declared and not used error
 	Isddd     bool // is the argument variadic
@@ -361,7 +360,6 @@ const (
 	OAS2MAPR         // List = Rlist (x, ok = m["foo"])
 	OAS2DOTTYPE      // List = Rlist (x, ok = I.(int))
 	OASOP            // Left Etype= Right (x += y)
-	OASWB            // Left = Right (with write barrier)
 	OCALL            // Left(List) (function call, method call or type conversion)
 	OCALLFUNC        // Left(List) (function call f(args))
 	OCALLMETH        // Left(List) (direct method call x.Method(args))
@@ -495,15 +493,8 @@ const (
 	OINDREGSP   // offset plus indirect of REGSP, such as 8(SP).
 
 	// arch-specific opcodes
-	OCMP    // compare: ACMP.
-	ODEC    // decrement: ADEC.
-	OINC    // increment: AINC.
-	OEXTEND // extend: ACWD/ACDQ/ACQO.
 	OHMUL   // high mul: AMUL/AIMUL for unsigned/signed (OMUL uses AIMUL for both).
-	ORROTC  // right rotate-carry: ARCR.
 	ORETJMP // return to other function
-	OPS     // compare parity set (for x86 NaN check)
-	OPC     // compare parity clear (for x86 NaN check)
 	OGETG   // runtime.getg() (read g pointer)
 
 	OEND
@@ -565,13 +556,18 @@ func (n *Nodes) Set(s []*Node) {
 }
 
 // Set1 sets n to a slice containing a single node.
-func (n *Nodes) Set1(node *Node) {
-	n.slice = &[]*Node{node}
+func (n *Nodes) Set1(n1 *Node) {
+	n.slice = &[]*Node{n1}
 }
 
 // Set2 sets n to a slice containing two nodes.
 func (n *Nodes) Set2(n1, n2 *Node) {
 	n.slice = &[]*Node{n1, n2}
+}
+
+// Set3 sets n to a slice containing three nodes.
+func (n *Nodes) Set3(n1, n2, n3 *Node) {
+	n.slice = &[]*Node{n1, n2, n3}
 }
 
 // MoveNodes sets n to the contents of n2, then clears n2.
@@ -584,6 +580,18 @@ func (n *Nodes) MoveNodes(n2 *Nodes) {
 // It panics if n does not have at least i+1 elements.
 func (n Nodes) SetIndex(i int, node *Node) {
 	(*n.slice)[i] = node
+}
+
+// SetFirst sets the first element of Nodes to node.
+// It panics if n does not have at least one elements.
+func (n Nodes) SetFirst(node *Node) {
+	(*n.slice)[0] = node
+}
+
+// SetSecond sets the second element of Nodes to node.
+// It panics if n does not have at least two elements.
+func (n Nodes) SetSecond(node *Node) {
+	(*n.slice)[1] = node
 }
 
 // Addr returns the address of the i'th element of Nodes.
