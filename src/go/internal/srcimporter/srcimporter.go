@@ -35,7 +35,7 @@ func New(ctxt *build.Context, fset *token.FileSet, packages map[string]*types.Pa
 	return &Importer{
 		ctxt:     ctxt,
 		fset:     fset,
-		sizes:    types.SizesFor(ctxt.GOARCH), // uses go/types default if GOARCH not found
+		sizes:    types.SizesFor(ctxt.Compiler, ctxt.GOARCH), // uses go/types default if GOARCH not found
 		packages: packages,
 	}
 }
@@ -92,21 +92,26 @@ func (p *Importer) ImportFrom(path, srcDir string, mode types.ImportMode) (*type
 		if pkg == &importing {
 			return nil, fmt.Errorf("import cycle through package %q", bp.ImportPath)
 		}
-		if pkg.Complete() {
-			return pkg, nil
+		if !pkg.Complete() {
+			// Package exists but is not complete - we cannot handle this
+			// at the moment since the source importer replaces the package
+			// wholesale rather than augmenting it (see #19337 for details).
+			// Return incomplete package with error (see #16088).
+			return pkg, fmt.Errorf("reimported partially imported package %q", bp.ImportPath)
 		}
-	} else {
-		p.packages[bp.ImportPath] = &importing
-		defer func() {
-			// clean up in case of error
-			// TODO(gri) Eventually we may want to leave a (possibly empty)
-			// package in the map in all cases (and use that package to
-			// identify cycles). See also issue 16088.
-			if p.packages[bp.ImportPath] == &importing {
-				p.packages[bp.ImportPath] = nil
-			}
-		}()
+		return pkg, nil
 	}
+
+	p.packages[bp.ImportPath] = &importing
+	defer func() {
+		// clean up in case of error
+		// TODO(gri) Eventually we may want to leave a (possibly empty)
+		// package in the map in all cases (and use that package to
+		// identify cycles). See also issue 16088.
+		if p.packages[bp.ImportPath] == &importing {
+			p.packages[bp.ImportPath] = nil
+		}
+	}()
 
 	// collect package files
 	bp, err = p.ctxt.ImportDir(bp.Dir, 0)
@@ -131,6 +136,10 @@ func (p *Importer) ImportFrom(path, srcDir string, mode types.ImportMode) (*type
 	}
 	pkg, err = conf.Check(bp.ImportPath, p.fset, files, nil)
 	if err != nil {
+		// Type-checking stops after the first error (types.Config.Error is not set),
+		// so the returned package is very likely incomplete. Don't return it since
+		// we don't know its condition: It's very likely unsafe to use and it's also
+		// not added to p.packages which may cause further problems (issue #20837).
 		return nil, fmt.Errorf("type-checking package %q failed (%v)", bp.ImportPath, err)
 	}
 

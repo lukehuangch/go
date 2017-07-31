@@ -1,6 +1,6 @@
 <!--{
 	"Title": "The Go Programming Language Specification",
-	"Subtitle": "Version of February 9, 2017",
+	"Subtitle": "Version of June 28, 2017",
 	"Path": "/ref/spec"
 }-->
 
@@ -154,7 +154,7 @@ Any other comment acts like a newline.
 <p>
 Tokens form the vocabulary of the Go language.
 There are four classes: <i>identifiers</i>, <i>keywords</i>, <i>operators
-and delimiters</i>, and <i>literals</i>.  <i>White space</i>, formed from
+and punctuation</i>, and <i>literals</i>.  <i>White space</i>, formed from
 spaces (U+0020), horizontal tabs (U+0009),
 carriage returns (U+000D), and newlines (U+000A),
 is ignored except as it separates tokens
@@ -197,7 +197,7 @@ into the token stream immediately after a line's final token if that token is
 	    <code>return</code>
 	</li>
 
-	<li>one of the <a href="#Operators_and_Delimiters">operators and delimiters</a>
+	<li>one of the <a href="#Operators_and_punctuation">operators and punctuation</a>
 	    <code>++</code>,
 	    <code>--</code>,
 	    <code>)</code>,
@@ -254,10 +254,11 @@ const        fallthrough  if           range        type
 continue     for          import       return       var
 </pre>
 
-<h3 id="Operators_and_Delimiters">Operators and Delimiters</h3>
+<h3 id="Operators_and_punctuation">Operators and punctuation</h3>
 
 <p>
-The following character sequences represent <a href="#Operators">operators</a>, delimiters, and other special tokens:
+The following character sequences represent <a href="#Operators">operators</a>
+(including <a href="#assign_op">assignment operators</a>) and punctuation:
 </p>
 <pre class="grammar">
 +    &amp;     +=    &amp;=     &amp;&amp;    ==    !=    (    )
@@ -2294,7 +2295,8 @@ The key is interpreted as a field name for struct literals,
 an index for array and slice literals, and a key for map literals.
 For map literals, all elements must have a key. It is an error
 to specify multiple elements with the same field name or
-constant key value.
+constant key value. For non-constant map keys, see the section on
+<a href="#Order_of_evaluation">evaluation order</a>.
 </p>
 
 <p>
@@ -3382,7 +3384,7 @@ to the type of the other operand.
 
 <p>
 The right operand in a shift expression must have unsigned integer type
-or be an untyped constant that can be converted to unsigned integer type.
+or be an untyped constant representable by a value of type <code>uint</code>.
 If the left operand of a non-constant shift expression is an untyped constant,
 it is first converted to the type it would assume if the shift expression were
 replaced by its left operand alone.
@@ -3580,6 +3582,33 @@ IEEE-754 standard; whether a <a href="#Run_time_panics">run-time panic</a>
 occurs is implementation-specific.
 </p>
 
+<p>
+An implementation may combine multiple floating-point operations into a single
+fused operation, possibly across statements, and produce a result that differs
+from the value obtained by executing and rounding the instructions individually.
+A floating-point type <a href="#Conversions">conversion</a> explicitly rounds to
+the precision of the target type, preventing fusion that would discard that rounding.
+</p>
+
+<p>
+For instance, some architectures provide a "fused multiply and add" (FMA) instruction
+that computes <code>x*y + z</code> without rounding the intermediate result <code>x*y</code>.
+These examples show when a Go implementation can use that instruction:
+</p>
+
+<pre>
+// FMA allowed for computing r, because x*y is not explicitly rounded:
+r  = x*y + z
+r  = z;   r += x*y
+t  = x*y; r = t + z
+*p = x*y; r = *p + z
+r  = x*y + float64(z)
+
+// FMA disallowed for computing r, because it would omit rounding of x*y:
+r  = float64(x*y) + z
+r  = z; r += float64(x*y)
+t  = float64(x*y); r = t + z
+</pre>
 
 <h4 id="String_concatenation">String concatenation</h4>
 
@@ -3638,7 +3667,7 @@ These terms and the result of the comparisons are defined as follows:
 	</li>
 
 	<li>
-	Floating point values are comparable and ordered,
+	Floating-point values are comparable and ordered,
 	as defined by the IEEE-754 standard.
 	</li>
 
@@ -4494,8 +4523,8 @@ a[i] = 23
 
 <p>
 An <i>assignment operation</i> <code>x</code> <i>op</i><code>=</code>
-<code>y</code> where <i>op</i> is a binary arithmetic operation is equivalent
-to <code>x</code> <code>=</code> <code>x</code> <i>op</i>
+<code>y</code> where <i>op</i> is a binary <a href="#Arithmetic_operators">arithmetic operator</a>
+is equivalent to <code>x</code> <code>=</code> <code>x</code> <i>op</i>
 <code>(y)</code> but evaluates <code>x</code>
 only once.  The <i>op</i><code>=</code> construct is a single token.
 In assignment operations, both the left- and right-hand expression lists
@@ -4996,8 +5025,8 @@ a single byte in the string.
 <li>
 The iteration order over maps is not specified
 and is not guaranteed to be the same from one iteration to the next.
-If map entries that have not yet been reached are removed during iteration,
-the corresponding iteration values will not be produced. If map entries are
+If a map entry that has not yet been reached is removed during iteration,
+the corresponding iteration value will not be produced. If a map entry is
 created during iteration, that entry may be produced during the iteration or
 may be skipped. The choice may vary for each entry created and from one
 iteration to the next.
@@ -5097,7 +5126,7 @@ function completes.
 
 <pre>
 go Server()
-go func(ch chan&lt;- bool) { for { sleep(10); ch &lt;- true; }} (c)
+go func(ch chan&lt;- bool) { for { sleep(10); ch &lt;- true }} (c)
 </pre>
 
 
@@ -5643,7 +5672,7 @@ make(T, n)       slice      slice of type T with length n and capacity n
 make(T, n, m)    slice      slice of type T with length n and capacity m
 
 make(T)          map        map of type T
-make(T, n)       map        map of type T with initial space for n elements
+make(T, n)       map        map of type T with initial space for approximately n elements
 
 make(T)          channel    unbuffered channel of type T
 make(T, n)       channel    buffered channel of type T, buffer size n
@@ -5666,8 +5695,14 @@ s := make([]int, 1e3)           // slice with len(s) == cap(s) == 1000
 s := make([]int, 1&lt;&lt;63)         // illegal: len(s) is not representable by a value of type int
 s := make([]int, 10, 0)         // illegal: len(s) > cap(s)
 c := make(chan int, 10)         // channel with a buffer size of 10
-m := make(map[string]int, 100)  // map with initial space for 100 elements
+m := make(map[string]int, 100)  // map with initial space for approximately 100 elements
 </pre>
+
+<p>
+Calling <code>make</code> with a map type and size hint <code>n</code> will
+create a map with initial space to hold <code>n</code> map elements.
+The precise behavior is implementation-dependent.
+</p>
 
 
 <h3 id="Appending_and_copying_slices">Appending to and copying slices</h3>
@@ -5930,6 +5965,11 @@ print      prints all arguments; formatting of arguments is implementation-speci
 println    like print but prints spaces between arguments and a newline at the end
 </pre>
 
+<p>
+Implementation restriction: <code>print</code> and <code>println</code> need not
+accept arbitrary argument types, but printing of boolean, numeric, and string
+<a href="#Types">types</a> must be supported.
+</p>
 
 <h2 id="Packages">Packages</h2>
 
@@ -6391,7 +6431,7 @@ func Sizeof(variable ArbitraryType) uintptr
 A <code>Pointer</code> is a <a href="#Pointer_types">pointer type</a> but a <code>Pointer</code>
 value may not be <a href="#Address_operators">dereferenced</a>.
 Any pointer or value of <a href="#Types">underlying type</a> <code>uintptr</code> can be converted to
-a <code>Pointer</code> type and vice versa.
+a type of underlying type <code>Pointer</code> and vice versa.
 The effect of converting between <code>Pointer</code> and <code>uintptr</code> is implementation-defined.
 </p>
 

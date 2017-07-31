@@ -311,8 +311,8 @@ func (p *Profile) WriteTo(w io.Writer, debug int) error {
 	}
 
 	// Obtain consistent snapshot under lock; then process without lock.
-	all := make([][]uintptr, 0, len(p.m))
 	p.mu.Lock()
+	all := make([][]uintptr, 0, len(p.m))
 	for _, stk := range p.m {
 		all = append(all, stk)
 	}
@@ -398,11 +398,14 @@ func printCountProfile(w io.Writer, debug int, name string, p countProfile) erro
 	for _, k := range keys {
 		values[0] = int64(count[k])
 		locs = locs[:0]
-		for i, addr := range p.Stack(index[k]) {
-			if false && i > 0 { // TODO: why disabled?
-				addr--
+		for _, addr := range p.Stack(index[k]) {
+			// For count profiles, all stack addresses are
+			// return PCs, which is what locForPC expects.
+			l := b.locForPC(addr)
+			if l == 0 { // runtime.goexit
+				continue
 			}
-			locs = append(locs, b.locForPC(addr))
+			locs = append(locs, l)
 		}
 		b.pbSample(values, locs, nil)
 	}

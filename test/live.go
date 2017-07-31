@@ -255,16 +255,18 @@ func g15() string
 // and also that none show up in "ambiguously live" messages.
 
 var m map[string]int
+var mi map[interface{}]int
 
-// str is used to ensure that a temp is required for runtime calls below.
+// str and iface are used to ensure that a temp is required for runtime calls below.
 func str() string
+func iface() interface{}
 
 func f16() {
 	if b {
-		delete(m, str()) // ERROR "live at call to mapdelete: .autotmp_[0-9]+$"
+		delete(mi, iface()) // ERROR "live at call to mapdelete: .autotmp_[0-9]+$"
 	}
-	delete(m, str()) // ERROR "live at call to mapdelete: .autotmp_[0-9]+$"
-	delete(m, str()) // ERROR "live at call to mapdelete: .autotmp_[0-9]+$"
+	delete(mi, iface()) // ERROR "live at call to mapdelete: .autotmp_[0-9]+$"
+	delete(mi, iface()) // ERROR "live at call to mapdelete: .autotmp_[0-9]+$"
 }
 
 var m2s map[string]*byte
@@ -283,19 +285,19 @@ func f17a(p *byte) { // ERROR "live at entry to f17a: p$"
 func f17b(p *byte) { // ERROR "live at entry to f17b: p$"
 	// key temporary
 	if b {
-		m2s[str()] = p // ERROR "live at call to mapassign: p .autotmp_[0-9]+$" "live at call to str: p$"
+		m2s[str()] = p // ERROR "live at call to mapassign_faststr: p$" "live at call to str: p$"
 	}
-	m2s[str()] = p // ERROR "live at call to mapassign: p .autotmp_[0-9]+$" "live at call to str: p$"
-	m2s[str()] = p // ERROR "live at call to mapassign: p .autotmp_[0-9]+$" "live at call to str: p$"
+	m2s[str()] = p // ERROR "live at call to mapassign_faststr: p$" "live at call to str: p$"
+	m2s[str()] = p // ERROR "live at call to mapassign_faststr: p$" "live at call to str: p$"
 }
 
 func f17c() {
 	// key and value temporaries
 	if b {
-		m2s[str()] = f17d() // ERROR "live at call to f17d: .autotmp_[0-9]+$" "live at call to mapassign: .autotmp_[0-9]+ .autotmp_[0-9]+$"
+		m2s[str()] = f17d() // ERROR "live at call to f17d: .autotmp_[0-9]+$" "live at call to mapassign_faststr: .autotmp_[0-9]+$"
 	}
-	m2s[str()] = f17d() // ERROR "live at call to f17d: .autotmp_[0-9]+$" "live at call to mapassign: .autotmp_[0-9]+ .autotmp_[0-9]+$"
-	m2s[str()] = f17d() // ERROR "live at call to f17d: .autotmp_[0-9]+$" "live at call to mapassign: .autotmp_[0-9]+ .autotmp_[0-9]+$"
+	m2s[str()] = f17d() // ERROR "live at call to f17d: .autotmp_[0-9]+$" "live at call to mapassign_faststr: .autotmp_[0-9]+$"
+	m2s[str()] = f17d() // ERROR "live at call to f17d: .autotmp_[0-9]+$" "live at call to mapassign_faststr: .autotmp_[0-9]+$"
 }
 
 func f17d() *byte
@@ -589,14 +591,14 @@ func f38(b bool) {
 	// we care that the println lines have no live variables
 	// and therefore no output.
 	if b {
-		select { // ERROR "live at call to newselect: .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+$" "live at call to selectgo: .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+$"
-		case <-fc38(): // ERROR "live at call to selectrecv: .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+$"
+		select { // ERROR "live at call to newselect:( .autotmp_[0-9]+)+$" "live at call to selectgo:( .autotmp_[0-9]+)+$"
+		case <-fc38(): // ERROR "live at call to selectrecv:( .autotmp_[0-9]+)+$"
 			printnl()
-		case fc38() <- *fi38(1): // ERROR "live at call to fc38: .autotmp_[0-9]+$" "live at call to fi38: .autotmp_[0-9]+ .autotmp_[0-9]+$" "live at call to selectsend: .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+$"
+		case fc38() <- *fi38(1): // ERROR "live at call to fc38:( .autotmp_[0-9]+)+$" "live at call to fi38:( .autotmp_[0-9]+)+$" "live at call to selectsend:( .autotmp_[0-9]+)+$"
 			printnl()
-		case *fi38(2) = <-fc38(): // ERROR "live at call to fc38: .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+$" "live at call to fi38: .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+$" "live at call to selectrecv: .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+$"
+		case *fi38(2) = <-fc38(): // ERROR "live at call to fc38:( .autotmp_[0-9]+)+$" "live at call to fi38:( .autotmp_[0-9]+)+$" "live at call to selectrecv:( .autotmp_[0-9]+)+$"
 			printnl()
-		case *fi38(3), *fb38() = <-fc38(): // ERROR "live at call to fb38: .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+$" "live at call to fc38: .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+$" "live at call to fi38: .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+$" "live at call to selectrecv2: .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+ .autotmp_[0-9]+$"
+		case *fi38(3), *fb38() = <-fc38(): // ERROR "live at call to fb38:( .autotmp_[0-9]+)+$" "live at call to fc38:( .autotmp_[0-9]+)+$" "live at call to fi38:( .autotmp_[0-9]+)+$" "live at call to selectrecv:( .autotmp_[0-9]+)+$"
 			printnl()
 		}
 		printnl()

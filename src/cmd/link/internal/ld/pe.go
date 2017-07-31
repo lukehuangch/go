@@ -5,7 +5,7 @@
 package ld
 
 import (
-	"cmd/internal/obj"
+	"cmd/internal/objabi"
 	"cmd/internal/sys"
 	"encoding/binary"
 	"fmt"
@@ -460,8 +460,8 @@ func Peinit(ctxt *Link) {
 
 	if Linkmode == LinkInternal {
 		// some mingw libs depend on this symbol, for example, FindPESectionByName
-		ctxt.xdefine("__image_base__", obj.SDATA, PEBASE)
-		ctxt.xdefine("_image_base__", obj.SDATA, PEBASE)
+		ctxt.xdefine("__image_base__", SDATA, PEBASE)
+		ctxt.xdefine("_image_base__", SDATA, PEBASE)
 	}
 
 	HEADR = PEFILEHEADR
@@ -516,7 +516,7 @@ func initdynimport(ctxt *Link) *Dll {
 	dr = nil
 	var m *Imp
 	for _, s := range ctxt.Syms.Allsym {
-		if !s.Attr.Reachable() || s.Type != obj.SDYNIMPORT {
+		if !s.Attr.Reachable() || s.Type != SDYNIMPORT {
 			continue
 		}
 		for d = dr; d != nil; d = d.next {
@@ -558,7 +558,7 @@ func initdynimport(ctxt *Link) *Dll {
 		// Add real symbol name
 		for d := dr; d != nil; d = d.next {
 			for m = d.ms; m != nil; m = m.next {
-				m.s.Type = obj.SDATA
+				m.s.Type = SDATA
 				Symgrow(m.s, int64(SysArch.PtrSize))
 				dynName := m.s.Extname
 				// only windows/386 requires stdcall decoration
@@ -567,21 +567,21 @@ func initdynimport(ctxt *Link) *Dll {
 				}
 				dynSym := ctxt.Syms.Lookup(dynName, 0)
 				dynSym.Attr |= AttrReachable
-				dynSym.Type = obj.SHOSTOBJ
+				dynSym.Type = SHOSTOBJ
 				r := Addrel(m.s)
 				r.Sym = dynSym
 				r.Off = 0
 				r.Siz = uint8(SysArch.PtrSize)
-				r.Type = obj.R_ADDR
+				r.Type = objabi.R_ADDR
 			}
 		}
 	} else {
 		dynamic := ctxt.Syms.Lookup(".windynamic", 0)
 		dynamic.Attr |= AttrReachable
-		dynamic.Type = obj.SWINDOWS
+		dynamic.Type = SWINDOWS
 		for d := dr; d != nil; d = d.next {
 			for m = d.ms; m != nil; m = m.next {
-				m.s.Type = obj.SWINDOWS | obj.SSUB
+				m.s.Type = SWINDOWS | SSUB
 				m.s.Sub = dynamic.Sub
 				dynamic.Sub = m.s
 				m.s.Value = dynamic.Size
@@ -801,7 +801,7 @@ func addexports(ctxt *Link) {
 
 // perelocsect relocates symbols from first in section sect, and returns
 // the total number of relocations emitted.
-func perelocsect(ctxt *Link, sect *Section, syms []*Symbol) int {
+func perelocsect(ctxt *Link, sect *Section, syms []*Symbol, base uint64) int {
 	// If main section has no bits, nothing to relocate.
 	if sect.Vaddr >= sect.Seg.Vaddr+sect.Seg.Filelen {
 		return 0
@@ -841,7 +841,7 @@ func perelocsect(ctxt *Link, sect *Section, syms []*Symbol) int {
 			if r.Xsym.Dynid < 0 {
 				Errorf(sym, "reloc %d to non-coff symbol %s (outer=%s) %d", r.Type, r.Sym.Name, r.Xsym.Name, r.Sym.Type)
 			}
-			if !Thearch.PEreloc1(sym, r, int64(uint64(sym.Value+int64(r.Off))-sect.Seg.Vaddr)) {
+			if !Thearch.PEreloc1(sym, r, int64(uint64(sym.Value+int64(r.Off))-base)) {
 				Errorf(sym, "unsupported obj reloc %d/%d to %s", r.Type, r.Siz, r.Sym.Name)
 			}
 
@@ -887,28 +887,41 @@ func peemitreloc(ctxt *Link, text, data, ctors *IMAGE_SECTION_HEADER) {
 	}
 
 	peemitsectreloc(text, func() int {
-		n := perelocsect(ctxt, Segtext.Sect, ctxt.Textp)
-		for sect := Segtext.Sect.Next; sect != nil; sect = sect.Next {
-			n += perelocsect(ctxt, sect, datap)
+		n := perelocsect(ctxt, Segtext.Sections[0], ctxt.Textp, Segtext.Vaddr)
+		for _, sect := range Segtext.Sections[1:] {
+			n += perelocsect(ctxt, sect, datap, Segtext.Vaddr)
 		}
 		return n
 	})
 
 	peemitsectreloc(data, func() int {
 		var n int
-		for sect := Segdata.Sect; sect != nil; sect = sect.Next {
-			n += perelocsect(ctxt, sect, datap)
+		for _, sect := range Segdata.Sections {
+			n += perelocsect(ctxt, sect, datap, Segdata.Vaddr)
 		}
 		return n
 	})
+
+dwarfLoop:
+	for _, sect := range Segdwarf.Sections {
+		for i, name := range shNames {
+			if sect.Name == name {
+				peemitsectreloc(&sh[i], func() int {
+					return perelocsect(ctxt, sect, dwarfp, sect.Vaddr)
+				})
+				continue dwarfLoop
+			}
+		}
+		Errorf(nil, "peemitsectreloc: could not find %q section", sect.Name)
+	}
 
 	peemitsectreloc(ctors, func() int {
 		dottext := ctxt.Syms.Lookup(".text", 0)
 		Lputl(0)
 		Lputl(uint32(dottext.Dynid))
-		switch obj.GOARCH {
+		switch objabi.GOARCH {
 		default:
-			Errorf(dottext, "unknown architecture for PE: %q\n", obj.GOARCH)
+			Errorf(dottext, "unknown architecture for PE: %q\n", objabi.GOARCH)
 		case "386":
 			Wputl(IMAGE_REL_I386_DIR32)
 		case "amd64":
@@ -923,7 +936,7 @@ func (ctxt *Link) dope() {
 	rel := ctxt.Syms.Lookup(".rel", 0)
 
 	rel.Attr |= AttrReachable
-	rel.Type = obj.SELFROSECT
+	rel.Type = SELFROSECT
 
 	initdynimport(ctxt)
 	initdynexport(ctxt)
@@ -996,24 +1009,24 @@ func writePESymTableRecords(ctxt *Link) int {
 		// Only windows/386 requires underscore prefix on external symbols.
 		if SysArch.Family == sys.I386 &&
 			Linkmode == LinkExternal &&
-			(s.Type == obj.SHOSTOBJ || s.Attr.CgoExport()) {
+			(s.Type == SHOSTOBJ || s.Attr.CgoExport()) {
 			s.Name = "_" + s.Name
 		}
 
 		typ := uint16(IMAGE_SYM_TYPE_NULL)
 		var sect int
 		var value int64
-		// Note: although address of runtime.edata (type SDATA) is at the start of .bss section
-		// it still belongs to the .data section, not the .bss section.
-		// Same for runtime.epclntab (type STEXT), it belongs to .text
-		// section, not the .data section.
-		if uint64(s.Value) >= Segdata.Vaddr+Segdata.Filelen && s.Type != obj.SDATA && Linkmode == LinkExternal {
-			value = int64(uint64(s.Value) - Segdata.Vaddr - Segdata.Filelen)
-			sect = bsssect
-		} else if uint64(s.Value) >= Segdata.Vaddr && s.Type != obj.STEXT {
-			value = int64(uint64(s.Value) - Segdata.Vaddr)
-			sect = datasect
-		} else if uint64(s.Value) >= Segtext.Vaddr {
+		if s.Sect != nil && s.Sect.Seg == &Segdata {
+			// Note: although address of runtime.edata (type SDATA) is at the start of .bss section
+			// it still belongs to the .data section, not the .bss section.
+			if uint64(s.Value) >= Segdata.Vaddr+Segdata.Filelen && s.Type != SDATA && Linkmode == LinkExternal {
+				value = int64(uint64(s.Value) - Segdata.Vaddr - Segdata.Filelen)
+				sect = bsssect
+			} else {
+				value = int64(uint64(s.Value) - Segdata.Vaddr)
+				sect = datasect
+			}
+		} else if s.Sect != nil && s.Sect.Seg == &Segtext {
 			value = int64(uint64(s.Value) - Segtext.Vaddr)
 			sect = textsect
 		} else if type_ == UndefinedSym {
@@ -1027,7 +1040,11 @@ func writePESymTableRecords(ctxt *Link) int {
 			typ = IMAGE_SYM_DTYPE_ARRAY<<8 + IMAGE_SYM_TYPE_STRUCT
 			typ = 0x0308 // "array of structs"
 		}
-		writeOneSymbol(s, value, sect, typ, IMAGE_SYM_CLASS_EXTERNAL)
+		class := IMAGE_SYM_CLASS_EXTERNAL
+		if s.Version != 0 || (s.Type&SHIDDEN != 0) || s.Attr.Local() {
+			class = IMAGE_SYM_CLASS_STATIC
+		}
+		writeOneSymbol(s, value, sect, typ, uint8(class))
 	}
 
 	if Linkmode == LinkExternal {
@@ -1126,9 +1143,9 @@ func addinitarray(ctxt *Link) (c *IMAGE_SECTION_HEADER) {
 	// However, the entire Go runtime is initialized from just one function, so it is unlikely
 	// that this will need to grow in the future.
 	var size int
-	switch obj.GOARCH {
+	switch objabi.GOARCH {
 	default:
-		fmt.Fprintf(os.Stderr, "link: unknown architecture for PE: %q\n", obj.GOARCH)
+		fmt.Fprintf(os.Stderr, "link: unknown architecture for PE: %q\n", objabi.GOARCH)
 		os.Exit(2)
 	case "386":
 		size = 4
@@ -1145,7 +1162,7 @@ func addinitarray(ctxt *Link) (c *IMAGE_SECTION_HEADER) {
 	init_entry := ctxt.Syms.Lookup(*flagEntrySymbol, 0)
 	addr := uint64(init_entry.Value) - init_entry.Sect.Vaddr
 
-	switch obj.GOARCH {
+	switch objabi.GOARCH {
 	case "386":
 		Lputl(uint32(addr))
 	case "amd64":
@@ -1275,7 +1292,7 @@ func Asmbpe(ctxt *Link) {
 	oh.SizeOfImage = uint32(nextsectoff)
 	oh64.SizeOfHeaders = uint32(PEFILEHEADR)
 	oh.SizeOfHeaders = uint32(PEFILEHEADR)
-	if Headtype == obj.Hwindowsgui {
+	if windowsgui {
 		oh64.Subsystem = IMAGE_SUBSYSTEM_WINDOWS_GUI
 		oh.Subsystem = IMAGE_SUBSYSTEM_WINDOWS_GUI
 	} else {
@@ -1291,30 +1308,32 @@ func Asmbpe(ctxt *Link) {
 	// size otherwise reserve will be rounded up to a
 	// larger size, as verified with VMMap.
 
-	// Go code would be OK with 64k stacks, but we need larger stacks for cgo.
+	// On 64-bit, we always reserve 2MB stacks. "Pure" Go code is
+	// okay with much smaller stacks, but the syscall package
+	// makes it easy to call into arbitrary C code without cgo,
+	// and system calls even in "pure" Go code are actually C
+	// calls that may need more stack than we think.
 	//
 	// The default stack reserve size affects only the main
 	// thread, ctrlhandler thread, and profileloop thread. For
 	// these, it must be greater than the stack size assumed by
 	// externalthreadhandler.
 	//
-	// For other threads we specify stack size in runtime explicitly
-	// (runtime knows whether cgo is enabled or not).
+	// For other threads we specify stack size in runtime explicitly.
 	// For these, the reserve must match STACKSIZE in
 	// runtime/cgo/gcc_windows_{386,amd64}.c and the correspondent
 	// CreateThread parameter in runtime.newosproc.
+	oh64.SizeOfStackReserve = 0x00200000
+	oh64.SizeOfStackCommit = 0x00200000 - 0x2000 // account for 2 guard pages
+
+	// 32-bit is trickier since there much less address space to
+	// work with. Here we use large stacks only in cgo binaries as
+	// a compromise.
 	if !iscgo {
-		oh64.SizeOfStackReserve = 0x00020000
 		oh.SizeOfStackReserve = 0x00020000
-		oh64.SizeOfStackCommit = 0x00001000
 		oh.SizeOfStackCommit = 0x00001000
 	} else {
-		oh64.SizeOfStackReserve = 0x00200000
 		oh.SizeOfStackReserve = 0x00100000
-
-		// account for 2 guard pages
-		oh64.SizeOfStackCommit = 0x00200000 - 0x2000
-
 		oh.SizeOfStackCommit = 0x00100000 - 0x2000
 	}
 

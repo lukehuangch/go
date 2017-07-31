@@ -292,16 +292,6 @@ type sudog struct {
 	c           *hchan // channel
 }
 
-type gcstats struct {
-	// the struct must consist of only uint64's,
-	// because it is casted to uint64[].
-	nhandoff    uint64
-	nhandoffcnt uint64
-	nprocyield  uint64
-	nosyield    uint64
-	nsleep      uint64
-}
-
 type libcall struct {
 	fn   uintptr
 	n    uintptr // number of parameters
@@ -436,7 +426,6 @@ type m struct {
 	fflag         uint32      // floating point compare flags
 	locked        uint32      // tracking for lockosthread
 	nextwaitm     uintptr     // next m waiting for lock
-	gcstats       gcstats
 	needextram    bool
 	traceback     uint8
 	waitunlockf   unsafe.Pointer // todo go func(*g, unsafe.pointer) bool
@@ -464,9 +453,10 @@ type p struct {
 	id          int32
 	status      uint32 // one of pidle/prunning/...
 	link        puintptr
-	schedtick   uint32   // incremented on every scheduler call
-	syscalltick uint32   // incremented on every system call
-	m           muintptr // back-link to associated m (nil if idle)
+	schedtick   uint32     // incremented on every scheduler call
+	syscalltick uint32     // incremented on every system call
+	sysmontick  sysmontick // last tick observed by sysmon
+	m           muintptr   // back-link to associated m (nil if idle)
 	mcache      *mcache
 	racectx     uintptr
 
@@ -501,6 +491,14 @@ type p struct {
 
 	tracebuf traceBufPtr
 
+	// traceSweep indicates the sweep events should be traced.
+	// This is used to defer the sweep start event until a span
+	// has actually been swept.
+	traceSweep bool
+	// traceSwept and traceReclaimed track the number of bytes
+	// swept and reclaimed by sweeping in the current sweep loop.
+	traceSwept, traceReclaimed uintptr
+
 	palloc persistentAlloc // per-P to avoid mutex
 
 	// Per-P GC state
@@ -521,7 +519,7 @@ type p struct {
 const (
 	// The max value of GOMAXPROCS.
 	// There are no fundamental restrictions on the value.
-	_MaxGomaxprocs = 1 << 8
+	_MaxGomaxprocs = 1 << 10
 )
 
 type schedt struct {
@@ -696,7 +694,7 @@ type _panic struct {
 
 // stack traces
 type stkframe struct {
-	fn       *_func     // function being run
+	fn       funcInfo   // function being run
 	pc       uintptr    // program counter within fn
 	continpc uintptr    // program counter where execution can continue, or 0 if not
 	lr       uintptr    // program counter at caller aka link register
@@ -723,22 +721,30 @@ var (
 	allm        *m
 	allp        [_MaxGomaxprocs + 1]*p
 	gomaxprocs  int32
-	panicking   uint32
 	ncpu        int32
 	forcegc     forcegcstate
 	sched       schedt
 	newprocs    int32
 
 	// Information about what cpu features are available.
-	// Set on startup in asm_{x86,amd64}.s.
-	cpuid_ecx         uint32
-	cpuid_edx         uint32
-	cpuid_ebx7        uint32
-	lfenceBeforeRdtsc bool
-	support_avx       bool
-	support_avx2      bool
-	support_bmi1      bool
-	support_bmi2      bool
+	// Set on startup in asm_{386,amd64,amd64p32}.s.
+	// Packages outside the runtime should not use these
+	// as they are not an external api.
+	processorVersionInfo uint32
+	isIntel              bool
+	lfenceBeforeRdtsc    bool
+	support_aes          bool
+	support_avx          bool
+	support_avx2         bool
+	support_bmi1         bool
+	support_bmi2         bool
+	support_erms         bool
+	support_osxsave      bool
+	support_popcnt       bool
+	support_sse2         bool
+	support_sse41        bool
+	support_sse42        bool
+	support_ssse3        bool
 
 	goarm                uint8 // set by cmd/link on arm systems
 	framepointer_enabled bool  // set by cmd/link

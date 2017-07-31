@@ -24,7 +24,10 @@ func TestCgoCrashHandler(t *testing.T) {
 }
 
 func TestCgoSignalDeadlock(t *testing.T) {
-	t.Parallel()
+	// Don't call t.Parallel, since too much work going on at the
+	// same time can cause the testprogcgo code to overrun its
+	// timeouts (issue #18598).
+
 	if testing.Short() && runtime.GOOS == "windows" {
 		t.Skip("Skipping in short mode") // takes up to 64 seconds
 	}
@@ -282,6 +285,10 @@ func testCgoPprof(t *testing.T, buildArg, runArg string) {
 
 	got, err := testEnv(exec.Command(exe, runArg)).CombinedOutput()
 	if err != nil {
+		if testenv.Builder() == "linux-amd64-alpine" {
+			// See Issue 18243 and Issue 19938.
+			t.Skipf("Skipping failing test on Alpine (golang.org/issue/18243). Ignoring error: %v", err)
+		}
 		t.Fatal(err)
 	}
 	fn := strings.TrimSpace(string(got))
@@ -389,5 +396,18 @@ func TestRaceSignal(t *testing.T) {
 	want := "OK\n"
 	if string(got) != want {
 		t.Errorf("expected %q got %s", want, got)
+	}
+}
+
+func TestCgoNumGoroutine(t *testing.T) {
+	switch runtime.GOOS {
+	case "windows", "plan9":
+		t.Skipf("skipping numgoroutine test on %s", runtime.GOOS)
+	}
+	t.Parallel()
+	got := runTestProg(t, "testprogcgo", "NumGoroutine")
+	want := "OK\n"
+	if got != want {
+		t.Errorf("expected %q got %v", want, got)
 	}
 }

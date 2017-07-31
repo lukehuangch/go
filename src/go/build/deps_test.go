@@ -43,6 +43,7 @@ var pkgDeps = map[string][]string{
 	"sync":                    {"internal/race", "runtime", "sync/atomic", "unsafe"},
 	"sync/atomic":             {"unsafe"},
 	"unsafe":                  {},
+	"internal/cpu":            {"runtime"},
 
 	"L0": {
 		"errors",
@@ -52,11 +53,12 @@ var pkgDeps = map[string][]string{
 		"sync",
 		"sync/atomic",
 		"unsafe",
+		"internal/cpu",
 	},
 
 	// L1 adds simple functions and strings processing,
 	// but not Unicode tables.
-	"math":          {"unsafe"},
+	"math":          {"internal/cpu", "unsafe"},
 	"math/bits":     {},
 	"math/cmplx":    {"math"},
 	"math/rand":     {"L0", "math"},
@@ -177,13 +179,13 @@ var pkgDeps = map[string][]string{
 	"regexp":         {"L2", "regexp/syntax"},
 	"regexp/syntax":  {"L2"},
 	"runtime/debug":  {"L2", "fmt", "io/ioutil", "os", "time"},
-	"runtime/pprof":  {"L2", "compress/gzip", "context", "fmt", "io/ioutil", "os", "text/tabwriter", "time"},
+	"runtime/pprof":  {"L2", "compress/gzip", "context", "encoding/binary", "fmt", "io/ioutil", "os", "text/tabwriter", "time"},
 	"runtime/trace":  {"L0"},
 	"text/tabwriter": {"L2"},
 
 	"testing":          {"L2", "flag", "fmt", "internal/race", "os", "runtime/debug", "runtime/pprof", "runtime/trace", "time"},
 	"testing/iotest":   {"L2", "log"},
-	"testing/quick":    {"L2", "flag", "fmt", "reflect"},
+	"testing/quick":    {"L2", "flag", "fmt", "reflect", "time"},
 	"internal/testenv": {"L2", "OS", "flag", "testing", "syscall"},
 
 	// L4 is defined as L3+fmt+log+time, because in general once
@@ -302,7 +304,7 @@ var pkgDeps = map[string][]string{
 	// do networking portably, it must have a small dependency set: just L0+basic os.
 	"net": {
 		"L0", "CGO",
-		"context", "math/rand", "os", "sort", "syscall", "time",
+		"context", "math/rand", "os", "reflect", "sort", "syscall", "time",
 		"internal/nettrace", "internal/poll",
 		"internal/syscall/windows", "internal/singleflight", "internal/race",
 		"golang_org/x/net/lif", "golang_org/x/net/route",
@@ -375,7 +377,7 @@ var pkgDeps = map[string][]string{
 	},
 	"crypto/x509": {
 		"L4", "CRYPTO-MATH", "OS", "CGO",
-		"crypto/x509/pkix", "encoding/pem", "encoding/hex", "net", "syscall",
+		"crypto/x509/pkix", "encoding/pem", "encoding/hex", "net", "os/user", "syscall",
 	},
 	"crypto/x509/pkix": {"L4", "CRYPTO-MATH"},
 
@@ -394,6 +396,7 @@ var pkgDeps = map[string][]string{
 		"golang_org/x/net/http2/hpack",
 		"golang_org/x/net/idna",
 		"golang_org/x/net/lex/httplex",
+		"golang_org/x/net/proxy",
 		"golang_org/x/text/unicode/norm",
 		"golang_org/x/text/width",
 		"internal/nettrace",
@@ -409,8 +412,8 @@ var pkgDeps = map[string][]string{
 	"expvar":             {"L4", "OS", "encoding/json", "net/http"},
 	"net/http/cgi":       {"L4", "NET", "OS", "crypto/tls", "net/http", "regexp"},
 	"net/http/cookiejar": {"L4", "NET", "net/http"},
-	"net/http/fcgi":      {"L4", "NET", "OS", "net/http", "net/http/cgi"},
-	"net/http/httptest":  {"L4", "NET", "OS", "crypto/tls", "flag", "net/http", "net/http/internal"},
+	"net/http/fcgi":      {"L4", "NET", "OS", "context", "net/http", "net/http/cgi"},
+	"net/http/httptest":  {"L4", "NET", "OS", "crypto/tls", "flag", "net/http", "net/http/internal", "crypto/x509"},
 	"net/http/httputil":  {"L4", "NET", "OS", "context", "net/http", "net/http/internal"},
 	"net/http/pprof":     {"L4", "OS", "html/template", "net/http", "runtime/pprof", "runtime/trace"},
 	"net/rpc":            {"L4", "NET", "encoding/gob", "html/template", "net/http"},

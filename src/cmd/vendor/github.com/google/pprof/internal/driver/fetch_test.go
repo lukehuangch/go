@@ -38,7 +38,7 @@ func TestSymbolizationPath(t *testing.T) {
 	}
 
 	// Save environment variables to restore after test
-	saveHome := os.Getenv("HOME")
+	saveHome := os.Getenv(homeEnv())
 	savePath := os.Getenv("PPROF_BINARY_PATH")
 
 	tempdir, err := ioutil.TempDir("", "home")
@@ -50,7 +50,7 @@ func TestSymbolizationPath(t *testing.T) {
 	os.Create(filepath.Join(tempdir, "pprof", "binaries", "abcde10001", "binary"))
 
 	obj := testObj{tempdir}
-	os.Setenv("HOME", tempdir)
+	os.Setenv(homeEnv(), tempdir)
 	for _, tc := range []struct {
 		env, file, buildID, want string
 		msgCount                 int
@@ -74,12 +74,12 @@ func TestSymbolizationPath(t *testing.T) {
 			},
 		}
 		s := &source{}
-		locateBinaries(p, s, obj, &proftest.TestUI{t, tc.msgCount})
+		locateBinaries(p, s, obj, &proftest.TestUI{T: t, Ignore: tc.msgCount})
 		if file := p.Mapping[0].File; file != tc.want {
 			t.Errorf("%s:%s:%s, want %s, got %s", tc.env, tc.file, tc.buildID, tc.want, file)
 		}
 	}
-	os.Setenv("HOME", saveHome)
+	os.Setenv(homeEnv(), saveHome)
 	os.Setenv("PPROF_BINARY_PATH", savePath)
 }
 
@@ -176,7 +176,7 @@ func TestFetch(t *testing.T) {
 		{path + "go.nomappings.crash", "/bin/gotest.exe"},
 		{"http://localhost/profile?file=cppbench.cpu", ""},
 	} {
-		p, _, _, err := grabProfile(&source{ExecName: tc.execName}, tc.source, 0, nil, testObj{}, &proftest.TestUI{t, 0})
+		p, _, _, err := grabProfile(&source{ExecName: tc.execName}, tc.source, 0, nil, testObj{}, &proftest.TestUI{T: t})
 		if err != nil {
 			t.Fatalf("%s: %s", tc.source, err)
 		}

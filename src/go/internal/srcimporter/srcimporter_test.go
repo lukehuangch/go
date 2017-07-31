@@ -76,7 +76,7 @@ func walkDir(t *testing.T, path string, endTime time.Time) (int, bool) {
 }
 
 func TestImportStdLib(t *testing.T) {
-	if runtime.GOOS == "nacl" {
+	if !testenv.HasSrc() {
 		t.Skip("no source code available")
 	}
 
@@ -102,7 +102,7 @@ var importedObjectTests = []struct {
 }
 
 func TestImportedTypes(t *testing.T) {
-	if runtime.GOOS == "nacl" {
+	if !testenv.HasSrc() {
 		t.Skip("no source code available")
 	}
 
@@ -130,5 +130,21 @@ func TestImportedTypes(t *testing.T) {
 		if got != test.want {
 			t.Errorf("%s: got %q; want %q", test.name, got, test.want)
 		}
+	}
+}
+
+func TestReimport(t *testing.T) {
+	if !testenv.HasSrc() {
+		t.Skip("no source code available")
+	}
+
+	// Reimporting a partially imported (incomplete) package is not supported (see issue #19337).
+	// Make sure we recognize the situation and report an error.
+
+	mathPkg := types.NewPackage("math", "math") // incomplete package
+	importer := New(&build.Default, token.NewFileSet(), map[string]*types.Package{mathPkg.Path(): mathPkg})
+	_, err := importer.ImportFrom("math", ".", 0)
+	if err == nil || !strings.HasPrefix(err.Error(), "reimport") {
+		t.Errorf("got %v; want reimport error", err)
 	}
 }

@@ -6,6 +6,15 @@
 // easier to remap stdin and stdout, connect I/O with pipes, and do other
 // adjustments.
 //
+// Unlike the "system" library call from C and other languages, the
+// os/exec package intentionally does not invoke the system shell and
+// does not expand any glob patterns or handle other expansions,
+// pipelines, or redirections typically done by shells. The package
+// behaves more like C's "exec" family of functions. To expand glob
+// patterns, either call the shell directly, taking care to escape any
+// dangerous input, or use the path/filepath package's Glob function.
+// To expand environment variables, use package os's ExpandEnv.
+//
 // Note that the examples in this package assume a Unix system.
 // They may not run on Windows, and they do not run in the Go Playground
 // used by golang.org and godoc.org.
@@ -83,17 +92,14 @@ type Cmd struct {
 	// If either is nil, Run connects the corresponding file descriptor
 	// to the null device (os.DevNull).
 	//
-	// If Stdout and Stderr are the same writer, at most one
-	// goroutine at a time will call Write.
+	// If Stdout and Stderr are the same writer, and have a type that can be compared with ==,
+	// at most one goroutine at a time will call Write.
 	Stdout io.Writer
 	Stderr io.Writer
 
 	// ExtraFiles specifies additional open files to be inherited by the
 	// new process. It does not include standard input, standard output, or
 	// standard error. If non-nil, entry i becomes file descriptor 3+i.
-	//
-	// BUG(rsc): On OS X 10.6, child processes may sometimes inherit unwanted fds.
-	// https://golang.org/issue/2603
 	ExtraFiles []*os.File
 
 	// SysProcAttr holds optional, operating system-specific attributes.
@@ -274,9 +280,8 @@ func (c *Cmd) closeDescriptors(closers []io.Closer) {
 // copying stdin, stdout, and stderr, and exits with a zero exit
 // status.
 //
-// If the command fails to run or doesn't complete successfully, the
-// error is of type *ExitError. Other error types may be
-// returned for I/O problems.
+// If the command starts but does not complete successfully, the error is of
+// type *ExitError. Other error types may be returned for other situations.
 func (c *Cmd) Run() error {
 	if err := c.Start(); err != nil {
 		return err
@@ -411,8 +416,10 @@ func (e *ExitError) Error() string {
 	return e.ProcessState.String()
 }
 
-// Wait waits for the command to exit.
-// It must have been started by Start.
+// Wait waits for the command to exit and waits for any copying to
+// stdin or copying from stdout or stderr to complete.
+//
+// The command must have been started by Start.
 //
 // The returned error is nil if the command runs, has no problems
 // copying stdin, stdout, and stderr, and exits with a zero exit

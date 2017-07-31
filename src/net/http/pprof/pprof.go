@@ -37,6 +37,11 @@
 //
 //	wget http://localhost:6060/debug/pprof/trace?seconds=5
 //
+// Or to look at the holders of contended mutexes, after calling
+// runtime.SetMutexProfileFraction in your program:
+//
+//	go tool pprof http://localhost:6060/debug/pprof/mutex
+//
 // To view all available profiles, open http://localhost:6060/debug/pprof/
 // in your browser.
 //
@@ -230,7 +235,6 @@ func (name handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		runtime.GC()
 	}
 	p.WriteTo(w, debug)
-	return
 }
 
 // Index responds with the pprof-formatted profile named by the request.
